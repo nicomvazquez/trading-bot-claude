@@ -38,9 +38,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Bot Trading - Bybit Futures", lifespan=lifespan)
 
 # Registra las paginas (cada modulo llama a @ui.page al importarse).
-from app.ui.pages import backtesting, configuracion, estrategias, operaciones, overview  # noqa: E402,F401
+from app.ui.pages import ayuda, backtesting, configuracion, estrategias, operaciones, overview  # noqa: E402,F401
 
-ui.run_with(app, title="Bot Trading")
+ui.run_with(app, title="Bot Trading", language="es")
 
 if __name__ in {"__main__", "__mp_main__"}:
     import uvicorn

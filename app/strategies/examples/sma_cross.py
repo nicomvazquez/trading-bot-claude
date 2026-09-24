@@ -17,8 +17,8 @@ class SmaCrossStrategy(Strategy):
     key = "sma_cross"
     display_name = "Cruce de Medias Móviles (SMA)"
     description = (
-        "Va largo cuando la media móvil rápida cruza hacia arriba a la lenta, y corto cuando cruza hacia abajo. "
-        "Sigue tendencias: gana en mercados direccionales y pierde en laterales."
+        "Compra cuando la media móvil rápida cruza hacia arriba a la lenta y cierra cuando vuelve a cruzar hacia abajo. "
+        "Solo opera largos. Sigue tendencias: gana en mercados alcistas y direccionales y pierde en laterales."
     )
     params_model = SmaCrossParams
 

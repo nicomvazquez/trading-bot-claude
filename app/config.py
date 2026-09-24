@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     bybit_api_secret: str = ""
 
     app_port: int = 8080
+    # Zona horaria en la que se MUESTRAN las horas y se cuenta el "dia" (todo se guarda en UTC). Argentina: UTC-3.
+    app_timezone: str = "America/Argentina/Buenos_Aires"
 
     # False: copia de demostracion con datos de ejemplo. No arranca runners ni permite encender instancias,
     # asi que nunca envia ordenes al exchange (ver docker-compose, servicio app-demo).

@@ -7,6 +7,7 @@ from app.config import settings
 from app.live import instances as svc
 from app.live.events import load_events
 from app.live.orchestrator import orchestrator
+from app.timeutil import fmt
 from app.live.queries import load_instances, load_trades
 from app.live.stats import summarize
 from app.strategies import registry
@@ -39,7 +40,7 @@ def _ago(moment: dt.datetime | None) -> str:
         return f"hace {int(seconds // 60)} min"
     if seconds < 86400:
         return f"hace {int(seconds // 3600)} h"
-    return moment.strftime("%d/%m %H:%M")
+    return fmt(moment, "%d/%m %H:%M")
 
 
 def _param_chips(strategy_cls, params: dict) -> None:
@@ -257,7 +258,7 @@ async def estrategias_page() -> None:
                     icon, color = EVENT_STYLE.get(ev.kind, ("info", "text-gray-600"))
                     with ui.row().classes("items-start no-wrap gap-2 w-full"):
                         ui.icon(icon, size="18px").classes(color)
-                        ui.label(ev.timestamp.astimezone().strftime("%d/%m %H:%M")).classes("text-xs text-gray-500 w-24 shrink-0 pt-0.5")
+                        ui.label(fmt(ev.timestamp, "%d/%m %H:%M")).classes("text-xs text-gray-500 w-24 shrink-0 pt-0.5")
                         ui.label(ev.message).classes("text-sm text-gray-800")
 
     async def refresh() -> None:

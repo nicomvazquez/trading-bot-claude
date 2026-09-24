@@ -21,6 +21,8 @@ ORDER_TYPES = ("market", "limit")
 FUNDING_MODES = ("none", "constant", "historical")
 SIZING_MODES = ("risk_based", "fixed_notional_pct")
 MC_METHODS = ("shuffle", "bootstrap", "block_bootstrap")
+MIN_RANGE_DAYS = 7
+MAX_RANGE_DAYS = 1500
 
 
 @dataclass
@@ -38,6 +40,9 @@ class ExecutionConfig:
     funding_mode: str = "none"
     funding_rate_pct: float = 0.01  # por periodo de 8h, modo "constant" (positivo: longs pagan)
     intrabar_resolution: bool = False  # resolver SL/TP ambiguos con un timeframe menor
+    # Escenarios de estres (por defecto apagados: no cambian ningun resultado):
+    stop_slippage_bps: float = 0.0  # empeoramiento EXTRA solo en los stop-loss (gaps en eventos de mercado)
+    funding_adverse: bool = False  # el funding siempre es un COSTO para la posicion, sin importar su lado
 
     @property
     def effective_maker_fee_pct(self) -> float:
@@ -59,8 +64,8 @@ class ExecutionConfig:
             errors.append("Las comisiones no pueden ser negativas (un rebate maker no puede superar 0.05%).")
         if self.taker_fee_pct > 5:
             errors.append("La comision taker es inverosimil (>5%).")
-        if self.slippage_bps < 0 or self.spread_bps < 0:
-            errors.append("Slippage y spread no pueden ser negativos.")
+        if self.slippage_bps < 0 or self.spread_bps < 0 or self.stop_slippage_bps < 0:
+            errors.append("Slippage, spread y slippage de stops no pueden ser negativos.")
         if self.limit_ttl_bars < 1:
             errors.append("La vigencia de una orden limit debe ser al menos 1 vela.")
         return errors
@@ -124,8 +129,21 @@ class BacktestConfig:
     risk: RiskConfig = field(default_factory=RiskConfig)
     validation: ValidationConfig = field(default_factory=ValidationConfig)
 
+    def span_days(self) -> float:
+        """Duracion del periodo: la del rango de fechas si esta definido; si no, los dias hacia atras."""
+        if self.start and self.end:
+            return (self.end - self.start).total_seconds() / 86400
+        return float(self.days)
+
     def validate(self) -> list[str]:
         errors = self.execution.validate() + self.risk.validate() + self.validation.validate()
+        if self.start and self.end:
+            if self.start >= self.end:
+                errors.append("La fecha inicial debe ser anterior a la final.")
+            elif self.span_days() < MIN_RANGE_DAYS:
+                errors.append(f"El rango debe ser de al menos {MIN_RANGE_DAYS} días: con menos no hay operaciones suficientes para concluir nada.")
+            elif self.span_days() > MAX_RANGE_DAYS:
+                errors.append(f"El rango no puede superar {MAX_RANGE_DAYS} días.")
         if self.initial_capital is None or self.initial_capital <= 0:
             errors.append("El capital inicial debe ser positivo.")
         if not self.symbol:

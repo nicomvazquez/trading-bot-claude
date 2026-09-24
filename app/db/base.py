@@ -21,6 +21,12 @@ _SCHEMA_PATCHES = [
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS take_profit FLOAT",
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_reason VARCHAR",
     "ALTER TABLE candles ADD COLUMN IF NOT EXISTS fetched_at TIMESTAMPTZ",
+    "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS strategy_version VARCHAR",
+    "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS exchange VARCHAR",
+    "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS initial_capital FLOAT",
+    "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS config JSON",
+    "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS trades JSON",
+    "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS equity JSON",
 ]
 
 

@@ -4,6 +4,8 @@ Funciones puras (sin base de datos) para poder testearlas."""
 import datetime as dt
 from typing import Iterable
 
+from app.timeutil import day_start_utc
+
 
 def closed_trades(trades: Iterable) -> list:
     return sorted((t for t in trades if t.closed_at is not None), key=lambda t: t.closed_at)
@@ -20,7 +22,7 @@ def equity_curve(trades: Iterable, initial_capital: float) -> list[tuple[dt.date
 
 def summarize(trades: Iterable, now: dt.datetime | None = None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start = day_start_utc(now)  # «hoy» empieza a medianoche de la hora local (Argentina), no de UTC
     trades = list(trades)
     closed = closed_trades(trades)
     pnls = [t.pnl or 0.0 for t in closed]

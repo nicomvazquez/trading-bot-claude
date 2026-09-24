@@ -11,7 +11,9 @@ from dataclasses import dataclass, field
 import pandas as pd
 from pydantic import BaseModel
 
-from app.backtest.config import BacktestConfig
+from app.backtest.config import BacktestConfig, ConfigError
+from app.timeutil import fmt
+from app.backtest.quality import bar_delta
 from app.backtest.data import load_candles
 from app.backtest.engine import Backtester, BacktestResult
 from app.backtest.extras import enrich_candles
@@ -52,10 +54,34 @@ def strategy_fingerprint(strategy_cls: type[Strategy]) -> str:
     return f"v{strategy_cls.version}+{digest}"
 
 
-def resolve_period(config: BacktestConfig) -> tuple[dt.datetime, dt.datetime]:
-    end = config.end or dt.datetime.now(dt.timezone.utc)
+def resolve_period(config: BacktestConfig, now: dt.datetime | None = None) -> tuple[dt.datetime, dt.datetime]:
+    """Periodo a simular. Con rango de fechas se usa tal cual (el fin nunca pasa de ahora: no hay velas del futuro);
+    sin rango, `days` hacia atras desde ahora."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    end = min(config.end, now) if config.end else now
     start = config.start or end - dt.timedelta(days=config.days)
+    if start >= end:
+        raise ConfigError("La fecha inicial debe ser anterior a la final y no puede estar en el futuro.")
     return start, end
+
+
+def coverage_warnings(candles: pd.DataFrame, start: dt.datetime, end: dt.datetime, timeframe: str) -> list[str]:
+    """Avisos cuando los datos no cubren todo el rango pedido (por ejemplo, el simbolo empezo a cotizar despues)."""
+    if candles.empty:
+        return []
+    bar = bar_delta(timeframe)
+    first, last = pd.Timestamp(candles.index[0]), pd.Timestamp(candles.index[-1]) + bar
+    start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+    slack = 3 * bar
+    warnings = []
+    if first - start_ts > slack:
+        warnings.append(
+            f"Solo hay datos desde el {fmt(first, '%d/%m/%Y')}: el período efectivo es más corto que el pedido "
+            f"(desde el {fmt(start_ts, '%d/%m/%Y')})."
+        )
+    if end_ts - last > slack:
+        warnings.append(f"Los datos terminan el {fmt(last, '%d/%m/%Y')}, antes del fin pedido ({fmt(end_ts, '%d/%m/%Y')}).")
+    return warnings
 
 
 async def prepare_market_data(config: BacktestConfig, strategy_cls: type[Strategy] | None = None) -> MarketData:
@@ -67,6 +93,7 @@ async def prepare_market_data(config: BacktestConfig, strategy_cls: type[Strateg
     market = MarketData(candles=candles, quality=quality.to_dict(), start=start, end=end)
     if candles.empty:
         return market
+    market.quality.setdefault("warnings", []).extend(coverage_warnings(candles, start, end, config.timeframe))
 
     required = tuple(getattr(strategy_cls, "required_data", ()) or ())
     if required:

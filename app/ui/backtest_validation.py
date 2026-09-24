@@ -23,6 +23,7 @@ from app.backtest.validation import (
     run_walk_forward,
     split_from_fraction,
 )
+from app.timeutil import fmt, local_midnight_utc
 from app.ui import backtest_charts as charts
 from app.ui import backtest_widgets as w
 from app.ui.backtest_axes import AxesSelector
@@ -68,7 +69,7 @@ def _build_oos(panel: ConfigPanel) -> None:
         )
         with ui.row().classes("w-full items-start gap-4"):
             pct = _outlined(ui.number("In-sample (%)", value=70, min=10, max=90, step=5)).classes("w-40")
-            cut_date = _outlined(ui.input("Fecha de corte (AAAA-MM-DD)")).classes("w-64").props(
+            cut_date = _outlined(ui.input("Fecha de corte (AAAA-MM-DD, hora argentina)")).classes("w-64").props(
                 'hint="Opcional: si la completás, reemplaza al porcentaje"'
             )
             button = ui.button("Correr validación fuera de muestra", icon="play_arrow").props("unelevated no-caps")
@@ -90,7 +91,7 @@ def _build_oos(panel: ConfigPanel) -> None:
                 raise ValueError("No se encontraron velas para ese símbolo y rango.")
             if (cut_date.value or "").strip():
                 try:
-                    cut = pd.Timestamp(dt.datetime.strptime(cut_date.value.strip(), "%Y-%m-%d"), tz="UTC")
+                    cut = pd.Timestamp(local_midnight_utc(dt.datetime.strptime(cut_date.value.strip(), "%Y-%m-%d").date()))  # medianoche local (Argentina)
                 except ValueError as exc:
                     raise ValueError("Fecha de corte inválida: usá el formato AAAA-MM-DD.") from exc
             else:
@@ -115,7 +116,7 @@ def _build_oos(panel: ConfigPanel) -> None:
 
 def _period_chip(seg: Segment) -> str:
     days = (seg.end - seg.start).total_seconds() / 86400
-    return f"{seg.label}: {seg.start.strftime('%d/%m/%Y')} → {seg.end.strftime('%d/%m/%Y')} ({days:.0f} días)"
+    return f"{seg.label}: {fmt(seg.start, '%d/%m/%Y')} → {fmt(seg.end, '%d/%m/%Y')} ({days:.0f} días)"
 
 
 def _render_oos(in_seg: Segment, out_seg: Segment, cut, data_warnings: list[str]) -> None:
@@ -228,7 +229,7 @@ def _build_walk_forward(panel: ConfigPanel) -> None:
 
     def update_estimate() -> None:
         try:
-            days = float(panel.days.value or 0)
+            days = panel.span_days()
             n = _estimate_windows(days, float(train.value or 0), float(test.value or 0), float(step.value or 0))
         except (TypeError, ValueError):
             n = 0
@@ -238,13 +239,14 @@ def _build_walk_forward(panel: ConfigPanel) -> None:
         need = (train.value or 0) + (test.value or 0)
         text = f"{n} ventanas · {sims:,} simulaciones (máximo {MAX_WF_SIMULATIONS:,})"
         if n == 0:
-            text = f"No entra ninguna ventana: hacen falta al menos {need:g} días de historia (hoy: {panel.days.value:g})."
+            text = f"No entra ninguna ventana: hacen falta al menos {need:g} días de historia (el rango elegido tiene {panel.span_days():g})."
         holder["label"].text = text
         holder["label"].classes(replace=AxesSelector.label_classes(too_many))
         holder["run"].set_enabled(not too_many)
 
-    for element in (train, test, step, mode, panel.days):
+    for element in (train, test, step, mode):
         element.on_value_change(lambda _: update_estimate())
+    panel.on_range_change(update_estimate)
     update_estimate()
 
     results_box = ui.column().classes("w-full gap-4")
@@ -342,7 +344,7 @@ def _render_walk_forward(result: WalkForwardResult, timeframe: str) -> None:
 
     evaluated = [wr for wr in result.windows]
     labels = [f"V{wr.window.index + 1}" for wr in evaluated]
-    hover = [f"{wr.window.test_start.strftime('%d/%m/%y')} → {wr.window.test_end.strftime('%d/%m/%y')}" for wr in evaluated]
+    hover = [f"{fmt(wr.window.test_start, '%d/%m/%y')} → {fmt(wr.window.test_end, '%d/%m/%y')}" for wr in evaluated]
     train_r = [(wr.train_metrics or {}).get("total_return_pct") for wr in evaluated]
     test_r = [(wr.test_metrics or {}).get("total_return_pct") for wr in evaluated]
     with w.bordered_card():
@@ -370,10 +372,10 @@ def _render_windows_table(result: WalkForwardResult) -> None:
         tm, rm = wr.test_metrics or {}, wr.train_metrics or {}
         row = {
             "n": wr.window.index + 1,
-            "train_start": wr.window.train_start.strftime("%Y-%m-%d"),
-            "train_end": wr.window.train_end.strftime("%Y-%m-%d"),
-            "test_start": wr.window.test_start.strftime("%Y-%m-%d"),
-            "test_end": wr.window.test_end.strftime("%Y-%m-%d"),
+            "train_start": fmt(wr.window.train_start, "%Y-%m-%d"),
+            "train_end": fmt(wr.window.train_end, "%Y-%m-%d"),
+            "test_start": fmt(wr.window.test_start, "%Y-%m-%d"),
+            "test_end": fmt(wr.window.test_end, "%Y-%m-%d"),
             "train_return": _r(rm.get("total_return_pct")), "train_sharpe": _r(rm.get("sharpe_ratio")),
             "return": _r(tm.get("total_return_pct")), "sharpe": _r(tm.get("sharpe_ratio")),
             "mdd": _r(tm.get("max_drawdown_pct")), "pf": _r(tm.get("profit_factor")),

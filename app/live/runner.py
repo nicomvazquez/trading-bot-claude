@@ -9,6 +9,7 @@ from app.db.base import async_session
 from app.db.models import BotSettings, Order, StrategyInstance, Trade
 from app.exchange.bybit_client import bybit_client
 from app.live.events import log_event
+from app.timeutil import day_start_utc, fmt as fmt_time, label as tz_label
 from app.live.rules import decide_candle, should_adopt_position, summarize_closed_pnl
 from app.risk.manager import RiskLimits, RiskManager
 from app.strategies import registry
@@ -100,7 +101,7 @@ class StrategyRunner:
                         last_seen_candle = newest_ts
                         await log_event(
                             self.instance_id, "started",
-                            f"Esperando la próxima vela cerrada (la última fue {newest_ts.strftime('%H:%M')} UTC): "
+                            f"Esperando la próxima vela cerrada (la última fue {fmt_time(newest_ts, '%H:%M')}, {tz_label()}): "
                             "no se opera con señales anteriores al encendido",
                         )
                     elif action == "evaluate":
@@ -326,7 +327,7 @@ class StrategyRunner:
         return instance.initial_capital + realized_pnl
 
     async def _daily_pnl_pct(self, instance: StrategyInstance) -> float:
-        today_start = dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = day_start_utc()  # el dia del limite de perdida diaria empieza a medianoche de la hora local
         async with async_session() as session:
             result = await session.execute(
                 select(func.coalesce(func.sum(Trade.pnl), 0.0)).where(

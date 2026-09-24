@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from app.backtest.engine import BacktestResult, TradeRecord
+from app.timeutil import local_index, naive_local
 from app.ui.backtest_format import EXIT_REASON_LABELS
 
 BLUE = "#2a78d6"
@@ -44,8 +45,14 @@ def _decimate(index: pd.DatetimeIndex, values: np.ndarray, max_points: int = MAX
 
 
 def _py(ts):
-    """datetime nativo (el JSON de NiceGUI no acepta subclases como pd.Timestamp)."""
-    return ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+    """datetime nativo en hora local y sin zona (el JSON de NiceGUI no acepta subclases como pd.Timestamp y Plotly
+    muestra el reloj tal cual, sin convertir zonas)."""
+    return naive_local(ts)
+
+
+def _dt(index):
+    """Indice de fechas listo para un grafico: hora local, sin zona."""
+    return local_index(index).to_pydatetime()
 
 
 def _detail(t: TradeRecord, kind: str) -> str:
@@ -97,7 +104,7 @@ def equity_drawdown_chart(result: BacktestResult, highlight: TradeRecord | None 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.09, row_heights=[0.7, 0.3])
     fig.add_trace(
         go.Scatter(
-            x=x_e.to_pydatetime(), y=y_e, mode="lines", name="Capital", line=dict(color=BLUE, width=2),
+            x=_dt(x_e), y=y_e, mode="lines", name="Capital", line=dict(color=BLUE, width=2),
             hovertemplate="Capital: $%{y:,.2f}<extra></extra>",
         ),
         row=1, col=1,
@@ -116,7 +123,7 @@ def equity_drawdown_chart(result: BacktestResult, highlight: TradeRecord | None 
     )
     fig.add_trace(
         go.Scatter(
-            x=x_d.to_pydatetime(), y=y_d, mode="lines", name="Drawdown",
+            x=_dt(x_d), y=y_d, mode="lines", name="Drawdown",
             line=dict(color=RED, width=1.5), fill="tozeroy", fillcolor="rgba(227,73,72,0.12)",
             hovertemplate="Drawdown: %{y:.2f}%<extra></extra>",
         ),
@@ -159,7 +166,7 @@ def price_trades_chart(result: BacktestResult, candles: pd.DataFrame, highlight:
     x, y = _decimate(window.index, window["close"].to_numpy())
     fig = go.Figure(
         go.Scatter(
-            x=x.to_pydatetime(), y=y, mode="lines", name="Precio (cierre)",
+            x=_dt(x), y=y, mode="lines", name="Precio (cierre)",
             line=dict(color=MUTED, width=1.5), hovertemplate="Precio: %{y:,.2f}<extra></extra>",
         )
     )
@@ -315,11 +322,11 @@ def oos_equity_chart(in_result: BacktestResult, out_result: BacktestResult, cut)
     x_out, y_out = _decimate(e_out.index, e_out.to_numpy() * scale)
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=x_in.to_pydatetime(), y=y_in, mode="lines", name="In-sample", line=dict(color=BLUE, width=2),
+        x=_dt(x_in), y=y_in, mode="lines", name="In-sample", line=dict(color=BLUE, width=2),
         hovertemplate="In-sample: $%{y:,.2f}<extra></extra>",
     ))
     fig.add_trace(go.Scatter(
-        x=x_out.to_pydatetime(), y=y_out, mode="lines", name="Out-of-sample (re-escalado)",
+        x=_dt(x_out), y=y_out, mode="lines", name="Out-of-sample (re-escalado)",
         line=dict(color=ORANGE, width=2), hovertemplate="Out-of-sample: $%{y:,.2f}<extra></extra>",
     ))
     fig.add_vline(
@@ -352,4 +359,71 @@ def walkforward_bars(labels: list[str], train: list[float | None], test: list[fl
     ))
     fig.update_xaxes(showgrid=False, showline=True, linecolor=BASELINE, tickfont=dict(color=MUTED))
     fig.update_yaxes(gridcolor=GRID, zeroline=False, ticksuffix="%", tickfont=dict(color=MUTED))
+    return fig
+
+
+def cost_line_chart(xs: list[float], values: list[float | None], x_title: str, current_x: float | None = None,
+                    x_prefix: str = "", x_suffix: str = "") -> go.Figure:
+    """Retorno total (%) segun un costo. Una sola escala; la linea gris marca el 0 (punto de equilibrio)."""
+    fig = go.Figure(go.Scatter(
+        x=[f"{x_prefix}{x:g}{x_suffix}" for x in xs], y=values, mode="lines+markers",
+        line=dict(color=BLUE, width=2), marker=dict(size=8, color=[LOSS if (v is not None and v < 0) else BLUE for v in values]),
+        hovertemplate=f"{x_title}: %{{x}}<br>Retorno: %{{y:.2f}}%<extra></extra>", connectgaps=False,
+    ))
+    fig.add_hline(y=0, line=dict(color=BASELINE, width=1))
+    if current_x is not None and current_x in xs:
+        fig.add_vline(x=xs.index(current_x), line=dict(color=MUTED, width=1, dash="dot"),
+                      annotation_text="Actual", annotation_position="top", annotation_font=dict(size=11, color=MUTED))
+    fig.update_layout(**_base_layout(height=260, margin=dict(l=56, r=16, t=28, b=44), showlegend=False))
+    fig.update_xaxes(type="category", title_text=x_title, title_font=dict(size=12), showgrid=False, showline=True,
+                     linecolor=BASELINE, tickfont=dict(color=MUTED))
+    fig.update_yaxes(title_text="Retorno total (%)", title_font=dict(size=12), gridcolor=GRID, zeroline=False,
+                     ticksuffix="%", tickfont=dict(color=MUTED))
+    return fig
+
+
+def scenario_bars(labels: list[str], values: list[float | None], base_value: float | None) -> go.Figure:
+    """Retorno total (%) por escenario, en el orden dado (sin ranking). Rojo = pierde, azul = gana; la linea
+    punteada es el escenario base."""
+    fig = go.Figure(go.Bar(
+        y=labels, x=[0 if v is None else v for v in values], orientation="h",
+        marker=dict(color=[LOSS if (v is not None and v < 0) else BLUE for v in values]),
+        text=["sin datos" if v is None else f"{v:+.1f}%" for v in values], textposition="outside", cliponaxis=False,
+        hovertemplate="%{y}<br>Retorno: %{x:.2f}%<extra></extra>",
+    ))
+    fig.add_vline(x=0, line=dict(color=BASELINE, width=1))
+    if base_value is not None:
+        fig.add_vline(x=base_value, line=dict(color=MUTED, width=1, dash="dot"),
+                      annotation_text="Base", annotation_position="top", annotation_font=dict(size=11, color=MUTED))
+    fig.update_layout(**_base_layout(height=max(280, 44 * len(labels) + 60), margin=dict(l=190, r=70, t=28, b=36), showlegend=False, bargap=0.35))
+    fig.update_xaxes(gridcolor=GRID, zeroline=False, ticksuffix="%", tickfont=dict(color=MUTED))
+    fig.update_yaxes(autorange="reversed", showgrid=False, tickfont=dict(color=INK_2))
+    return fig
+
+
+# Paleta categorica validada con el script de la skill dataviz (primeras 6 posiciones, en este orden fijo).
+SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
+
+
+def compare_equity_chart(series: list[tuple[str, str, pd.Series]]) -> go.Figure:
+    """Retorno acumulado (%) de varias corridas en una sola escala. `series`: (nombre completo, etiqueta corta, curva en %).
+    El color depende de la POSICION en la seleccion, no del rendimiento (no hay ranking)."""
+    fig = go.Figure()
+    for i, (name, short, curve) in enumerate(series):
+        color = SERIES_COLORS[i % len(SERIES_COLORS)]
+        x, y = _decimate(pd.DatetimeIndex(curve.index), curve.to_numpy(dtype=float))
+        fig.add_trace(go.Scatter(
+            x=_dt(x), y=y, mode="lines", name=name, line=dict(color=color, width=2),
+            hovertemplate=f"{short}: %{{y:.2f}}%<extra></extra>",
+        ))
+        if len(series) <= 4:  # etiqueta directa al final de la linea
+            fig.add_annotation(x=_py(x[-1]), y=float(y[-1]), text=short, showarrow=False, xanchor="left", xshift=6,
+                               font=dict(size=11, color=INK_2))
+    fig.add_hline(y=0, line=dict(color=BASELINE, width=1))
+    fig.update_layout(**_base_layout(
+        height=380, margin=dict(l=64, r=56, t=48, b=36), hovermode="x unified",
+        legend=dict(orientation="h", x=0, xanchor="left", y=1.08, yanchor="bottom"),
+    ))
+    fig.update_xaxes(showgrid=False, showline=True, linecolor=BASELINE, tickfont=dict(color=MUTED))
+    fig.update_yaxes(gridcolor=GRID, zeroline=False, ticksuffix="%", title_text="Retorno acumulado", title_font=dict(size=12), tickfont=dict(color=MUTED))
     return fig

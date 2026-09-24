@@ -123,7 +123,7 @@ async def configuracion_page() -> None:
             with w.bordered_card("gap-2"):
                 w.section_title("Límites de riesgo", "El Risk Manager los revisa antes de cada operación nueva; ninguna estrategia puede saltearlos.")
                 max_daily_loss = _field(
-                    "Pérdida diaria máxima por instancia (%)", "Si una instancia pierde más que esto en el día UTC, deja de abrir operaciones hasta el día siguiente.",
+                    "Pérdida diaria máxima por instancia (%)", "Si una instancia pierde más que esto en el día (de 00:00 a 24:00, hora argentina), deja de abrir operaciones hasta el día siguiente.",
                     value=bot_settings.max_daily_loss_pct, min=0.1, max=100.0, step=0.5,
                 )
                 max_positions = _field(

@@ -7,7 +7,10 @@ from app.config import settings
 from app.exchange.bybit_client import bybit_client
 from app.live.events import load_events
 from app.live.orchestrator import orchestrator
-from app.live.queries import load_bot_status, load_instances, load_trades
+from app.exports import instances_table, live_orders_table, live_trades_table
+from app.timeutil import fmt, naive_local
+from app.live.queries import load_bot_status, load_instances, load_orders, load_trades
+from app.ui.export_button import export_button
 from app.live.stats import closed_trades, summarize
 from app.ui import backtest_charts as charts
 from app.ui import backtest_widgets as w
@@ -30,7 +33,7 @@ PNL_SLOT = r"""
 
 def _curve_figure(points: list, initial: float) -> go.Figure:
     fig = go.Figure(go.Scatter(
-        x=[t for t, _ in points], y=[e for _, e in points], mode="lines+markers", line_shape="hv",
+        x=[naive_local(t) for t, _ in points], y=[e for _, e in points], mode="lines+markers", line_shape="hv",
         line=dict(color=charts.BLUE, width=2), marker=dict(size=6, color=charts.BLUE),
         fill="tozeroy", fillcolor="rgba(42,120,214,0.08)", hovertemplate="$%{y:,.2f}<extra></extra>",
     ))
@@ -71,8 +74,19 @@ def _table(columns: list[tuple[str, str]], rows: list[dict], left: tuple[str, ..
 def overview_page() -> None:
     render_nav("/")
     demo = settings.bybit_demo
-    with page_content("Resumen", "Estado de la cuenta y de las estrategias en vivo. Se actualiza solo.",
-                      actions=lambda: pill("Demo Trading" if demo else "MAINNET", "warn" if demo else "bad")):
+    async def export_tables():
+        instances, trades, orders = await load_instances(), await load_trades(), await load_orders(1000)
+        names = {i.id: i.name for i in instances}
+        by_instance: dict[int, list] = {}
+        for trade in trades:
+            by_instance.setdefault(trade.strategy_instance_id, []).append(trade)
+        return [instances_table(instances, by_instance, summarize), live_trades_table(trades, names), live_orders_table(orders, names)]
+
+    def header_actions() -> None:
+        export_button(export_tables, "resumen", ["Instancias", "Trades", "Órdenes"])
+        pill("Demo Trading" if demo else "MAINNET", "warn" if demo else "bad")
+
+    with page_content("Resumen", "Estado de la cuenta y de las estrategias en vivo. Se actualiza solo.", actions=header_actions):
         body = ui.column().classes("w-full gap-6")
 
     async def refresh() -> None:
@@ -123,7 +137,7 @@ def overview_page() -> None:
                                   f"como el BTC y ETH de Demo, es {fmt_usd(wallet['equity']) if wallet else '—'}.")
                 w._tile("PnL realizado", fmt_usd(stats["total_pnl"], signed=True), sub=f"{stats['closed']} trades cerrados",
                         color_class=sign_class(stats["total_pnl"]))
-                w._tile("PnL de hoy", fmt_usd(stats["pnl_today"], signed=True), sub="Día UTC", color_class=sign_class(stats["pnl_today"]))
+                w._tile("PnL de hoy", fmt_usd(stats["pnl_today"], signed=True), sub="Desde las 00:00, hora argentina", color_class=sign_class(stats["pnl_today"]))
                 w._tile("Posiciones abiertas", str(stats["open"]),
                         sub=f"No realizado {fmt_usd(wallet['unrealised_pnl'], signed=True)}" if wallet else None)
             with ui.element("div").classes("grid grid-cols-3 gap-3 w-full"):
@@ -172,7 +186,7 @@ def overview_page() -> None:
                         [{"id": t.id, "inst": names.get(t.strategy_instance_id, "?"), "symbol": t.symbol, "side": t.side,
                           "qty": t.qty, "entry": f"{t.entry_price:,.2f}", "sl": f"{t.stop_loss:,.2f}" if t.stop_loss else "—",
                           "tp": f"{t.take_profit:,.2f}" if t.take_profit else "—",
-                          "since": t.opened_at.astimezone().strftime("%d/%m %H:%M")} for t in open_trades],
+                          "since": fmt(t.opened_at, "%d/%m %H:%M")} for t in open_trades],
                         left=("inst", "symbol", "side"), slots={"side": SIDE_SLOT},
                     )
 

@@ -420,3 +420,64 @@ def test_the_lookahead_detector_catches_a_strategy_that_peeks_into_the_future() 
     limit = df.index[cut - 1]
     entries = lambda r: [(t.entry_time, t.side, round(t.entry_price, 8)) for t in r.trades if t.entry_time <= limit]
     assert entries(full) != entries(part)  # cortar el futuro cambia las entradas: el detector funciona
+
+
+# ------------------------------------------------------------------- estres: stops con gap y funding adverso
+def test_stop_slippage_only_hurts_stop_exits_not_take_profit_or_entries() -> None:
+    df = candles()
+    set_bar(df, 12, low=90.0)  # se activa el stop en 95
+    base = run(OneShot(), df, ExecutionConfig(taker_fee_pct=0.0)).trades[0]
+    worse = run(OneShot(), df, ExecutionConfig(taker_fee_pct=0.0, stop_slippage_bps=100)).trades[0]
+    assert base.exit_price == pytest.approx(95.0)
+    assert worse.exit_price == pytest.approx(95.0 * 0.99)        # 1% peor, solo en el stop
+    assert worse.entry_price == base.entry_price                  # la entrada no cambia
+    assert worse.pnl < base.pnl
+
+    df_tp = candles()
+    set_bar(df_tp, 12, high=111.0)  # se activa el take-profit en 110
+    a = run(OneShot(), df_tp, ExecutionConfig(taker_fee_pct=0.0)).trades[0]
+    b = run(OneShot(), df_tp, ExecutionConfig(taker_fee_pct=0.0, stop_slippage_bps=100)).trades[0]
+    assert a.exit_price == b.exit_price == pytest.approx(110.0)   # el take-profit no se ve afectado
+
+
+def test_stop_slippage_is_adverse_for_shorts_too() -> None:
+    df = candles()
+    set_bar(df, 12, high=110.0)  # el corto se para en 105
+    base = run(OneShot("sell", 105.0, 90.0), df, ExecutionConfig(taker_fee_pct=0.0)).trades[0]
+    worse = run(OneShot("sell", 105.0, 90.0), df, ExecutionConfig(taker_fee_pct=0.0, stop_slippage_bps=100)).trades[0]
+    assert worse.exit_price == pytest.approx(base.exit_price * 1.01)  # comprar de vuelta mas caro
+
+
+def test_adverse_funding_is_a_cost_for_longs_and_for_shorts() -> None:
+    exe = ExecutionConfig(taker_fee_pct=0.0, funding_mode="constant", funding_rate_pct=0.01, funding_adverse=True)
+    df = candles(20)
+    set_bar(df, 10, high=111.0, low=99.0)
+    assert run(OneShot(), df, exe).trades[0].funding == pytest.approx(-2 * 100 * 0.0001)
+    df_short = candles(20)
+    set_bar(df_short, 10, low=89.0, high=101.0)
+    short = run(OneShot("sell", 105.0, 90.0), df_short, exe).trades[0]
+    assert short.funding == pytest.approx(-2 * 100 * 0.0001)  # en el modo normal el corto COBRARIA +0.02
+
+
+def test_adverse_funding_uses_the_absolute_value_of_negative_rates() -> None:
+    df = candles(20)
+    set_bar(df, 10, high=111.0)
+    rates = pd.Series([-0.0005], index=pd.DatetimeIndex([T0 + 8 * HOUR]))  # los largos cobrarian
+    normal = run(OneShot(), df, ExecutionConfig(taker_fee_pct=0.0, funding_mode="historical"), funding_rates=rates).trades[0]
+    adverse = run(OneShot(), df, ExecutionConfig(taker_fee_pct=0.0, funding_mode="historical", funding_adverse=True), funding_rates=rates).trades[0]
+    assert normal.funding == pytest.approx(+2 * 100 * 0.0005) and adverse.funding == pytest.approx(-2 * 100 * 0.0005)
+
+
+def test_stress_options_are_off_by_default_and_validated() -> None:
+    exe = ExecutionConfig()
+    assert exe.stop_slippage_bps == 0.0 and exe.funding_adverse is False and exe.validate() == []
+    assert ExecutionConfig(stop_slippage_bps=-1).validate()
+
+
+def test_old_saved_configs_without_the_new_fields_still_load() -> None:
+    from app.backtest.config import BacktestConfig
+
+    data = BacktestConfig().to_dict()
+    del data["execution"]["stop_slippage_bps"], data["execution"]["funding_adverse"]  # una corrida guardada antes de esta version
+    cfg = BacktestConfig.from_dict(data)
+    assert cfg.execution.stop_slippage_bps == 0.0 and cfg.execution.funding_adverse is False

@@ -3,10 +3,10 @@ import logging
 
 from nicegui import ui
 from pydantic import ValidationError
-from sqlalchemy import select
 
 from app.backtest.config import ConfigError
 from app.backtest.engine import DataError
+from app.backtest.history import run_fields
 from app.backtest.monte_carlo import run_monte_carlo
 from app.backtest.service import BacktestOutput, run_backtest as run_backtest_service
 from app.db.base import async_session
@@ -15,6 +15,12 @@ from app.ui import backtest_widgets as w
 from app.ui.backtest_config_panel import ConfigPanel
 from app.ui.backtest_robustness import build_robustness_tab
 from app.ui.backtest_validation import build_validation_tab
+from app.exports import backtest_tables
+from app.strategies import registry
+from app.ui.backtest_format import EXIT_REASON_LABELS, METRIC_GROUPS, METRIC_LABELS
+from app.ui.backtest_history import build_history_tab
+from app.ui.backtest_stress import build_stress_tab
+from app.ui.export_button import export_button
 from app.ui.layout import page_content, render_nav
 
 logger = logging.getLogger(__name__)
@@ -23,24 +29,10 @@ _MC_LABELS = {"shuffle": "Shuffle de operaciones", "bootstrap": "Bootstrap", "bl
 
 
 async def _save_run(output: BacktestOutput, params: dict) -> None:
-    config = output.config
-    start, end = output.market.start, output.market.end
+    """Guarda la corrida completa: configuracion, version de la estrategia, operaciones y curva de capital."""
     async with async_session() as session:
-        session.add(
-            BacktestRun(
-                strategy_key=output.result.strategy_key, symbol=config.symbol, timeframe=config.timeframe,
-                params=params, start_date=start, end_date=end, metrics=output.metrics,
-            )
-        )
+        session.add(BacktestRun(**run_fields(output, params)))
         await session.commit()
-
-
-async def _load_recent_runs(limit: int = 30) -> list[BacktestRun]:
-    async with async_session() as session:
-        result = await session.execute(
-            select(BacktestRun).order_by(BacktestRun.created_at.desc()).limit(limit)
-        )
-        return list(result.scalars().all())
 
 
 def _friendly_error(exc: Exception) -> str:
@@ -76,6 +68,7 @@ async def backtesting_page() -> None:
             t_mc = ui.tab("Monte Carlo", icon="casino")
             t_rob = ui.tab("Robustness", icon="tune")
             t_val = ui.tab("Validation", icon="fact_check")
+            t_stress = ui.tab("Stress Test", icon="warning_amber")
             t_history = ui.tab("History", icon="history")
 
         boxes: dict[str, ui.column] = {}
@@ -94,17 +87,29 @@ async def backtesting_page() -> None:
             with ui.tab_panel(t_val).classes("p-0 pt-4"):
                 build_validation_tab(panel)
 
+            # ---------------- Stress Test ----------------
+            with ui.tab_panel(t_stress).classes("p-0 pt-4"):
+                build_stress_tab(panel)
+
             # ---------------- History ----------------
             with ui.tab_panel(t_history).classes("p-0 pt-4"):
-                with w.bordered_card():
-                    w.section_title("Corridas guardadas")
-                    runs_box = ui.column().classes("w-full")
+                with ui.column().classes("w-full gap-4"):
+                    refresh_history = build_history_tab(
+                        on_view=lambda output: show_saved_run(output),
+                        on_clone=lambda config, key, params: clone_run(config, key, params),
+                    )
 
-        async def refresh_history() -> None:
-            runs_box.clear()
-            runs = await _load_recent_runs()
-            with runs_box:
-                w.render_runs_table(runs)
+        def show_saved_run(output: BacktestOutput) -> None:
+            """Ver: muestra una corrida guardada en las pestañas de resultados, como si se acabara de correr."""
+            state["output"], state["params"] = output, output.result.params
+            render_results(output)
+            tabs.set_value(t_overview)
+            ui.run_javascript("window.scrollTo({top: 0, behavior: 'smooth'})")
+
+        def clone_run(config, strategy_key: str, params: dict) -> None:
+            """Clonar: carga la configuracion de una corrida guardada en el panel de arriba."""
+            panel.load(config, strategy_key, params)
+            ui.run_javascript("window.scrollTo({top: 0, behavior: 'smooth'})")
 
         def build_mc_tab(output: BacktestOutput) -> None:
             w.mc_intro()
@@ -142,7 +147,17 @@ async def backtesting_page() -> None:
         def render_results(output: BacktestOutput) -> None:
             header_box.clear()
             with header_box:
-                w.results_header(panel.strategy_cls.display_name, output.config, output.result, output.strategy_version)
+                strategy_name = registry.get(output.result.strategy_key).display_name
+                w.results_header(strategy_name, output.config, output.result, output.strategy_version)
+                with ui.row().classes("w-full justify-end"):
+                    export_button(
+                        lambda o=output: backtest_tables(
+                            o.result, o.metrics, o.config.to_dict(), strategy_name, o.strategy_version,
+                            METRIC_GROUPS, METRIC_LABELS, EXIT_REASON_LABELS,
+                        ),
+                        f"backtest_{output.result.strategy_key}_{output.config.symbol}_{output.config.timeframe}",
+                        ["Operaciones", "Equity", "Métricas"], label="Descargar resultados",
+                    )
             for box in boxes.values():
                 box.clear()
             with boxes["overview"]:

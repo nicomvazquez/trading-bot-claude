@@ -44,3 +44,13 @@ def test_summarize_without_trades_has_no_ratios() -> None:
     s = summarize([], now=NOW)
     assert s["closed"] == 0 and s["total_pnl"] == 0
     assert s["win_rate_pct"] is None and s["profit_factor"] is None
+
+
+def test_today_starts_at_argentina_midnight_not_utc_midnight() -> None:
+    import datetime as dt
+
+    now = dt.datetime(2026, 9, 24, 1, 0, tzinfo=dt.timezone.utc)                # 22:00 del 23/09 en Argentina
+    closed_before_midnight_ar = T(4.0, dt.datetime(2026, 9, 24, 0, 30, tzinfo=dt.timezone.utc))  # 21:30 del 23/09: HOY para Argentina
+    closed_yesterday_ar = T(9.0, dt.datetime(2026, 9, 23, 2, 0, tzinfo=dt.timezone.utc))         # 23:00 del 22/09: ayer
+    s = summarize([closed_before_midnight_ar, closed_yesterday_ar], now=now)
+    assert s["pnl_today"] == pytest.approx(4.0) and s["total_pnl"] == pytest.approx(13.0)

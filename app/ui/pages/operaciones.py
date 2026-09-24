@@ -1,16 +1,19 @@
 from nicegui import ui
 
+from app.timeutil import fmt
 from app.live.queries import load_instances, load_orders, load_trades
 from app.live.stats import summarize
 from app.ui import backtest_widgets as w
 from app.ui.backtest_format import EXIT_REASON_LABELS, fmt_pct, fmt_usd, sign_class
+from app.exports import live_orders_table, live_trades_table
+from app.ui.export_button import export_button
 from app.ui.layout import page_content, render_nav
 
 ALL = "todas"
 
 
 def _fmt_dt(value) -> str:
-    return value.astimezone().strftime("%d/%m %H:%M") if value else "—"
+    return fmt(value, "%d/%m %H:%M")
 
 
 def _fmt_price(value) -> str:
@@ -33,10 +36,14 @@ def operaciones_page() -> None:
                 ui.button("Actualizar", icon="refresh", on_click=lambda: load()).props("flat no-caps")
             summary = ui.row().classes("w-full gap-6 text-sm")
         with w.bordered_card():
-            w.section_title("Trades", "Cada fila es una posición completa (entrada y salida).")
+            with ui.row().classes("w-full items-start justify-between no-wrap"):
+                w.section_title("Trades", "Cada fila es una posición completa (entrada y salida). La descarga respeta los filtros de arriba.")
+                export_button(lambda: [live_trades_table(filtered(), state["names"])], "trades", ["Trades"])
             trades_box = ui.column().classes("w-full")
         with w.bordered_card():
-            w.section_title("Órdenes enviadas", "Últimas 200 órdenes enviadas al exchange.")
+            with ui.row().classes("w-full items-start justify-between no-wrap"):
+                w.section_title("Órdenes enviadas", "Últimas 200 órdenes enviadas al exchange.")
+                export_button(lambda: [live_orders_table(state["orders"], state["names"])], "ordenes", ["Órdenes"])
             orders_box = ui.column().classes("w-full")
 
     def filtered() -> list:

@@ -285,7 +285,7 @@ def compute_metrics(
     if cfg.get("execution_model") == "same_close":
         warn("warning", "Ejecucion en el cierre de la misma vela que genero la senal: es optimista (en la practica se ejecuta despues).")
     if not any((cfg.get("slippage_bps"), cfg.get("spread_bps"))) and cfg.get("funding_mode", "none") == "none":
-        warn("info", "Sin slippage, spread ni funding: los resultados son optimistas. Probalos en Analisis de costos.")
+        warn("info", "Sin slippage, spread ni funding: los resultados son optimistas. Probalos agregando slippage, spread y funding en la seccion C de la configuracion.")
     if data_quality:
         for text in data_quality.get("warnings", []):
             warn("warning", text)

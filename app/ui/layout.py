@@ -2,6 +2,7 @@
 y el contenedor de contenido. Es el unico lugar donde se definen colores y tipografia
 de la interfaz; los graficos usan los mismos valores (ver backtest_charts)."""
 
+import datetime as dt
 import logging
 from contextlib import contextmanager
 
@@ -9,6 +10,7 @@ from nicegui import ui
 
 from app.config import settings
 from app.live.queries import load_bot_status
+from app.timeutil import fmt, label as tz_label
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ NAV = [
     ("/estrategias", "Estrategias", "smart_toy"),
     ("/backtesting", "Backtesting", "science"),
     ("/configuracion", "Configuración", "tune"),
+    ("/ayuda", "Ayuda", "menu_book"),
 ]
 
 _CSS = """
@@ -59,6 +62,23 @@ body { background: var(--page) !important; -webkit-font-smoothing: antialiased; 
 .side-long { color:#0b7a3b; font-weight:600; }
 .side-short { color:#b02a2a; font-weight:600; }
 @media (max-width: 640px) { .q-table { font-size: 12px; } }
+.manual { font-size: 15px; line-height: 1.7; color: var(--ink); max-width: 100%; }
+.manual h1 { font-size: 28px; font-weight: 700; letter-spacing: -.01em; margin: 0 0 12px; }
+.manual h2 { font-size: 21px; font-weight: 650; margin: 36px 0 10px; padding-top: 18px; border-top: 1px solid var(--line); }
+.manual h3 { font-size: 17px; font-weight: 650; margin: 24px 0 8px; }
+.manual p { margin: 8px 0; }
+.manual ul, .manual ol { margin: 8px 0 8px 22px; }
+.manual li { margin: 3px 0; }
+.manual code { background: #eef1f6; padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+.manual pre { background: #14161a; color: #e8eaf0; padding: 14px 16px; border-radius: 10px; overflow-x: auto; margin: 12px 0; }
+.manual pre code { background: transparent; color: inherit; padding: 0; }
+.manual blockquote { margin: 14px 0; padding: 10px 16px; background: #fff7e6; border-left: 4px solid #d9a441; border-radius: 6px; color: #5b4310; }
+.manual blockquote p { margin: 4px 0; }
+.manual table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; display: block; overflow-x: auto; }
+.manual th { background: #f3f5f9; text-align: left; font-weight: 600; }
+.manual th, .manual td { border: 1px solid var(--line); padding: 8px 12px; vertical-align: top; }
+.manual tr:nth-child(even) td { background: #fafbfd; }
+.manual hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 """
 
 ui.add_head_html(
@@ -101,6 +121,7 @@ def render_nav(active_path: str) -> None:
                     sanitize=False,
                 )
                 status_label = ui.label("").classes("text-xs text-gray-600")
+                clock_label = ui.label("").classes("text-xs text-gray-500")
                 kill_label = ui.label("").classes("text-xs font-semibold text-[#b02a2a]")
 
     async def update_status() -> None:
@@ -110,6 +131,7 @@ def render_nav(active_path: str) -> None:
             logger.exception("No se pudo leer el estado del bot")
             return
         status_label.text = f"{status['running']} de {status['total']} instancias corriendo"
+        clock_label.text = f"{fmt(dt.datetime.now(dt.timezone.utc), '%H:%M')} · {tz_label()}"
         kill_label.text = "⛔ Kill-switch activado" if status["kill_switch"] else ""
 
     ui.timer(0.2, update_status, once=True)

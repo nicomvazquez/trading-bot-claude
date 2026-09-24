@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from nicegui import ui
 
+from app.timeutil import fmt
 from app.backtest.config import BacktestConfig
 from app.backtest.engine import BacktestResult, TradeRecord
 from app.backtest.metrics import trade_summary
@@ -96,7 +97,7 @@ def warnings_panel(warnings: list[dict]) -> None:
 
 def results_header(strategy_name: str, config: BacktestConfig, result: BacktestResult, strategy_version: str = "") -> None:
     curve = result.equity_curve
-    period = f"{curve.index[0].strftime('%d/%m/%Y')} → {curve.index[-1].strftime('%d/%m/%Y')}"
+    period = f"{fmt(curve.index[0], '%d/%m/%Y')} → {fmt(curve.index[-1], '%d/%m/%Y')}"
     e, r = config.execution, config.risk
     funding = {"none": "sin funding", "constant": f"funding {e.funding_rate_pct:g}%/8h", "historical": "funding histórico"}[e.funding_mode]
     chips = [
@@ -178,8 +179,8 @@ def trade_detail(trade: TradeRecord) -> None:
     side = "Long" if trade.side == "long" else "Short"
     items = [
         ("Operación", f"#{trade.id} · {side}"),
-        ("Entrada", f"{trade.entry_time.strftime('%Y-%m-%d %H:%M')} a {trade.entry_price:,.2f}"),
-        ("Salida", f"{trade.exit_time.strftime('%Y-%m-%d %H:%M')} a {trade.exit_price:,.2f}"),
+        ("Entrada", f"{fmt(trade.entry_time, '%d/%m/%Y %H:%M')} a {trade.entry_price:,.2f}"),
+        ("Salida", f"{fmt(trade.exit_time, '%d/%m/%Y %H:%M')} a {trade.exit_price:,.2f}"),
         ("Duración", fmt_duration(trade.duration)),
         ("Tamaño", f"{trade.qty:,.6g} unidades · nocional {fmt_usd(trade.notional)}"),
         ("PnL bruto", fmt_usd(trade.gross_pnl, signed=True)),
@@ -290,8 +291,8 @@ def _trade_rows(trades: list[TradeRecord]) -> list[dict]:
     return [
         {
             "id": t.id,
-            "entrada": t.entry_time.strftime("%Y-%m-%d %H:%M"),
-            "salida": t.exit_time.strftime("%Y-%m-%d %H:%M") if t.exit_time else "—",
+            "entrada": fmt(t.entry_time, "%d/%m/%Y %H:%M"),
+            "salida": fmt(t.exit_time, "%d/%m/%Y %H:%M"),
             "lado": t.side,
             "px_in": round(t.entry_price, 4),
             "px_out": round(t.exit_price, 4) if t.exit_price is not None else None,
@@ -594,7 +595,7 @@ def render_runs_table(runs: list) -> None:
         m = run.metrics or {}
         rows.append({
             "id": i,
-            "fecha": run.created_at.strftime("%Y-%m-%d %H:%M"),
+            "fecha": fmt(run.created_at, "%d/%m/%Y %H:%M"),
             "estrategia": run.strategy_key,
             "mercado": f"{run.symbol} · {TIMEFRAME_OPTIONS.get(run.timeframe, run.timeframe)}",
             "retorno": m.get("total_return_pct"),

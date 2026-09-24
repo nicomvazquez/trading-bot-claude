@@ -37,6 +37,17 @@ docker compose up --build
 
 Abrir http://localhost:8080
 
+## Documentación
+
+Los manuales están en `app/docs/` y también dentro de la aplicación, en la pantalla **Ayuda**:
+
+- [Manual de uso](app/docs/manual_de_uso.md): cómo funciona el sistema y cada pantalla, cómo opera el bot en vivo, mantenimiento y solución de problemas.
+- [Guía de estrategias](app/docs/estrategias.md): las siete estrategias, sus parámetros y cómo crear una propia.
+- [Guía del backtester](app/docs/backtester.md): cómo configurarlo, cómo simula y cómo leer e interpretar cada resultado.
+
+Un test (`tests/test_docs.py`) verifica que los parámetros, valores por defecto y rangos de la guía de estrategias
+coincidan con el código.
+
 ## Seguridad y red
 
 El dashboard **no tiene login**: está pensado para correr en un servidor privado.

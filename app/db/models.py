@@ -160,3 +160,11 @@ class BacktestRun(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)
     )
+    # Datos completos de la corrida (las filas guardadas antes de esta version los tienen en NULL):
+    strategy_version: Mapped[str | None] = mapped_column(String, nullable=True)  # version declarada + huella del codigo
+    exchange: Mapped[str | None] = mapped_column(String, nullable=True)
+    initial_capital: Mapped[float | None] = mapped_column(Float, nullable=True)
+    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # BacktestConfig completa (ejecucion, riesgo, validacion, semilla)
+    # Pesados: no se cargan en los listados (deferred), solo cuando se abre o compara una corrida.
+    trades: Mapped[list | None] = mapped_column(JSON, nullable=True, deferred=True)
+    equity: Mapped[dict | None] = mapped_column(JSON, nullable=True, deferred=True)

@@ -281,13 +281,15 @@ class Backtester:
         lo, hi = self._fund_idx.searchsorted(ts), self._fund_idx.searchsorted(end)
         return [(self._fund_idx[k], float(self._fund_vals[k])) for k in range(lo, hi)]
 
-    @staticmethod
-    def _apply_funding(st: _State, events, price: float, diag: dict, only_after=None) -> None:
+    def _apply_funding(self, st: _State, events, price: float, diag: dict, only_after=None) -> None:
         sign = 1 if st.position.side == "long" else -1
         for when, rate in events:
             if only_after is not None and when <= only_after:
                 continue
-            payment = -sign * st.position.qty * price * rate  # rate > 0: los largos pagan
+            if self.execution.funding_adverse:
+                payment = -st.position.qty * price * abs(rate)  # estres: siempre es un costo, sea largo o corto
+            else:
+                payment = -sign * st.position.qty * price * rate  # rate > 0: los largos pagan
             st.cash += payment
             st.trade.funding += payment
             diag["funding_events"] += 1
@@ -427,6 +429,9 @@ class Backtester:
             fill, fee_pct = ref, self.execution.effective_maker_fee_pct
         else:
             fill, fee_pct = self._adverse(ref, buying=not selling), self.execution.taker_fee_pct
+            if kind == "stop" and self.execution.stop_slippage_bps:
+                extra = self.execution.stop_slippage_bps / 10_000  # estres: el stop se ejecuta peor que lo normal
+                fill = fill * (1 - extra) if selling else fill * (1 + extra)
 
         sign = 1 if position.side == "long" else -1
         gross = sign * (fill - position.entry_price) * position.qty
