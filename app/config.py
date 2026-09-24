@@ -19,6 +19,10 @@ class Settings(BaseSettings):
 
     app_port: int = 8080
 
+    # False: copia de demostracion con datos de ejemplo. No arranca runners ni permite encender instancias,
+    # asi que nunca envia ordenes al exchange (ver docker-compose, servicio app-demo).
+    live_enabled: bool = True
+
     @property
     def database_url(self) -> str:
         return (

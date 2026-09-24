@@ -34,11 +34,13 @@ def render_param_form(
             ui.switch(label, value=bool(default)).on_value_change(make_handler(field_name))
         elif field.annotation in (int, float):
             step = 1 if field.annotation is int else 0.1
-            ui.number(label, value=default, step=step).on_value_change(make_handler(field_name))
-        else:
-            ui.input(label, value=str(default) if default is not None else "").on_value_change(
+            ui.number(label, value=default, step=step).props("outlined dense").classes("w-full").on_value_change(
                 make_handler(field_name)
             )
+        else:
+            ui.input(label, value=str(default) if default is not None else "").props(
+                "outlined dense"
+            ).classes("w-full").on_value_change(make_handler(field_name))
 
     def get_model() -> BaseModel:
         return model_cls(**values)

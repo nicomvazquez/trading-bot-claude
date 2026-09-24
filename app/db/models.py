@@ -19,6 +19,30 @@ class Candle(Base):
     low: Mapped[float] = mapped_column(Float)
     close: Mapped[float] = mapped_column(Float)
     volume: Mapped[float] = mapped_column(Float)
+    # Cuando se descargo la vela. Si se bajo antes de que cerrara, su OHLC puede
+    # estar incompleto y hay que volver a pedirla ("sospechosa").
+    fetched_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FundingRate(Base):
+    __tablename__ = "funding_rates"
+    __table_args__ = (UniqueConstraint("symbol", "timestamp"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    rate: Mapped[float] = mapped_column(Float)  # fraccion (0.0001 = 0.01%)
+
+
+class OpenInterest(Base):
+    __tablename__ = "open_interest"
+    __table_args__ = (UniqueConstraint("symbol", "interval", "timestamp"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    interval: Mapped[str] = mapped_column(String)  # 5min | 15min | 30min | 1h | 4h | 1d
+    timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    value: Mapped[float] = mapped_column(Float)  # contratos abiertos (unidades del activo)
 
 
 class StrategyInstance(Base):
@@ -89,6 +113,21 @@ class EquityPoint(Base):
     )
     timestamp: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     equity: Mapped[float] = mapped_column(Float)
+
+
+class StrategyEvent(Base):
+    """Bitacora de lo que hace cada instancia en vivo: aperturas, cierres, senales
+    rechazadas por riesgo, errores. Es lo que explica por que NO se opero."""
+
+    __tablename__ = "strategy_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_instance_id: Mapped[int] = mapped_column(ForeignKey("strategy_instances.id"), index=True)
+    timestamp: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+    kind: Mapped[str] = mapped_column(String)  # started | stopped | opened | closed | rejected | error
+    message: Mapped[str] = mapped_column(String)
 
 
 class BotSettings(Base):

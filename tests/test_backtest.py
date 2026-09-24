@@ -162,6 +162,16 @@ def test_position_size_is_capped_by_max_leverage() -> None:
     assert trade.qty * trade.entry_price <= 1000.0 * 5.0 + 1e-6
 
 
+def test_sum_of_trade_pnl_matches_equity_change_including_both_fees() -> None:
+    candles = _make_candles(n=400)
+    strategy = _AlternatingStrategy(_AlternatingParams())
+
+    result = Backtester(fee_pct=0.1, min_lookback=10).run(strategy, candles, initial_capital=1000.0)
+
+    total_pnl = sum(t.pnl for t in result.trades)
+    assert abs(total_pnl - (result.equity_curve.iloc[-1] - 1000.0)) < 1e-6
+
+
 def test_monte_carlo_returns_none_with_too_few_trades() -> None:
     candles = _make_candles(n=40)
     strategy = _AlternatingStrategy(_AlternatingParams())

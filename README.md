@@ -37,6 +37,40 @@ docker compose up --build
 
 Abrir http://localhost:8080
 
+## Seguridad y red
+
+El dashboard **no tiene login**: está pensado para correr en un servidor privado.
+
+- Postgres (5432) y Redis (6379) se publican solo en `127.0.0.1`; la app los usa por la red interna de Docker.
+- El dashboard escucha en `APP_BIND` (por defecto `0.0.0.0`, toda la red). Si el servidor tiene otras redes
+  o salida a internet, poné `APP_BIND=127.0.0.1` y accedé por túnel SSH/VPN, o cerrá el puerto en el firewall.
+- Cambiá `DB_PASSWORD` antes del primer arranque. En una base ya creada, el cambio hay que hacerlo también dentro
+  de Postgres: `ALTER USER <usuario> WITH PASSWORD '<nueva>';`. Con la contraseña por defecto la app avisa al
+  iniciar y, en MAINNET, se niega a arrancar.
+- Las API keys de Bybit van solo en `.env` (está en `.gitignore`). Creá la key **sin permiso de retiro**.
+
+## Datos de demostración
+
+Para ver los paneles llenos sin tocar la base real ni operar, hay una copia del dashboard con datos de ejemplo:
+
+```bash
+# una sola vez: crear la base de demostración y sembrarla
+docker compose exec db psql -U <DB_USER> -d <DB_NAME> -c 'CREATE DATABASE trading_demo OWNER "<DB_USER>"'
+docker compose --profile demo run --rm app-demo python -m app.tools.seed_demo
+
+docker compose --profile demo up -d app-demo      # http://localhost:8081
+docker compose --profile demo stop app-demo       # apagarla
+```
+
+Usa la base `trading_demo` y `LIVE_ENABLED=false`: no arranca runners ni permite encender instancias, así que
+nunca envía órdenes. El sembrado borra y recrea todas las tablas y se niega a correr sobre una base cuyo nombre
+no termine en `_demo`. Los datos son sintéticos (no son resultados reales).
+
+## Operativa en vivo: reglas
+
+- Una sola instancia activa por símbolo (Bybit tiene una posición por símbolo y cuenta).
+- Al encender una instancia se espera a la próxima vela cerrada: no opera con señales anteriores al encendido.
+
 ## Desarrollo local sin Docker (solo para tests unitarios)
 
 ```bash

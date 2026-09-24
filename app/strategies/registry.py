@@ -19,7 +19,9 @@ def get(key: str) -> type[Strategy]:
 
 
 def _load_builtin_strategies() -> None:
-    from app.strategies.examples import rsi_reversion, sma_cross  # noqa: F401
+    from app.strategies.examples import (  # noqa: F401
+        donchian_breakout, funding_oi, rsi_reversion, sma_cross, trend_pullback, volatility_squeeze,
+    )
     from app.strategies.ict import sweep_fvg  # noqa: F401
 
 

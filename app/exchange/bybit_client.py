@@ -1,7 +1,11 @@
 import asyncio
 import datetime as dt
+import logging
+import threading
+import time
 
 import pandas as pd
+from pybit import _helpers as pybit_helpers
 from pybit.exceptions import InvalidRequestError
 from pybit.unified_trading import HTTP
 
@@ -12,6 +16,43 @@ _INTERVAL_MINUTES = {
     "60": 60, "120": 120, "240": 240, "360": 360, "720": 720,
     "D": 1440, "W": 10080,
 }
+
+
+logger = logging.getLogger(__name__)
+
+_CLOCK_REFRESH_SECONDS = 600
+_clock = {"offset_ms": 0, "synced_at": 0.0, "lock": threading.Lock(), "probe": None}
+_probing = threading.local()
+
+
+def _install_clock_sync(probe_http: HTTP) -> None:
+    """Bybit rechaza los pedidos firmados cuyo timestamp adelanta mas de ~1 s a su
+    reloj (error 10002), y ampliar recv_window no lo evita. Si el reloj local esta
+    desfasado (tipico en Docker sobre Windows/WSL), se mide el desfase contra el
+    servidor y se compensa en cada firma. Se re-mide cada 10 minutos."""
+    _clock["probe"] = probe_http
+    original = pybit_helpers.generate_timestamp
+
+    def synced_timestamp() -> int:
+        # el propio pedido de medicion vuelve a pasar por aca: no debe medir de nuevo ni esperar
+        if not getattr(_probing, "active", False) and time.time() - _clock["synced_at"] > _CLOCK_REFRESH_SECONDS:
+            with _clock["lock"]:  # los demas hilos esperan a que termine la medicion en vez de firmar sin corregir
+                if time.time() - _clock["synced_at"] > _CLOCK_REFRESH_SECONDS:
+                    _probing.active = True
+                    try:
+                        _clock["synced_at"] = time.time()  # tambien ante fallo, para no reintentar en cada pedido
+                        before = time.time() * 1000
+                        server_ms = int(_clock["probe"].get_server_time()["time"])
+                        _clock["offset_ms"] = int(server_ms - (before + time.time() * 1000) / 2)
+                        if abs(_clock["offset_ms"]) > 500:
+                            logger.warning("Reloj local desfasado %+d ms respecto de Bybit: se compensa en las firmas", -_clock["offset_ms"])
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("No se pudo medir el desfase de reloj con Bybit: %s", exc)
+                    finally:
+                        _probing.active = False
+        return original() + _clock["offset_ms"]
+
+    pybit_helpers.generate_timestamp = synced_timestamp
 
 
 class BybitClient:
@@ -34,6 +75,7 @@ class BybitClient:
         # es la misma serie de precios que ya usa el propio Demo Trading.
         self._public_http = HTTP(testnet=False)
         self._instrument_cache: dict[str, dict] = {}
+        _install_clock_sync(self._public_http)
 
     async def check_connection(self) -> dict:
         """Llama a un endpoint autenticado liviano para validar las
@@ -144,6 +186,39 @@ class BybitClient:
         ]
         return candles
 
+    async def get_funding_history(self, symbol: str, start: dt.datetime, end: dt.datetime) -> list[dict]:
+        """Funding historico (mainnet, publico), paginando hacia atras. Bybit
+        devuelve hasta 200 registros por pedido, del mas reciente al mas viejo."""
+        start_ms = int(start.timestamp() * 1000)
+        cursor_end = int(end.timestamp() * 1000)
+
+        def _call(end_ms: int) -> list[dict]:
+            resp = self._public_http.get_funding_rate_history(
+                category="linear", symbol=symbol, startTime=start_ms, endTime=end_ms, limit=200
+            )
+            if resp.get("retCode") != 0:
+                raise RuntimeError(resp.get("retMsg", "Error desconocido de Bybit"))
+            return resp["result"]["list"]
+
+        by_ts: dict[int, float] = {}
+        while True:
+            batch = await asyncio.to_thread(_call, cursor_end)
+            if not batch:
+                break
+            for item in batch:
+                by_ts[int(item["fundingRateTimestamp"])] = float(item["fundingRate"])
+            oldest = min(int(item["fundingRateTimestamp"]) for item in batch)
+            if oldest <= start_ms or len(batch) < 200:
+                break
+            cursor_end = oldest - 1
+            await asyncio.sleep(0.1)
+
+        return [
+            {"timestamp": dt.datetime.fromtimestamp(ts / 1000, tz=dt.timezone.utc), "rate": rate}
+            for ts, rate in sorted(by_ts.items())
+            if start_ms <= ts
+        ]
+
     async def get_instrument_info(self, symbol: str) -> dict:
         """qtyStep/minOrderQty/tickSize del simbolo, para redondear cantidades
         y precios como Bybit los exige. Se cachea: no cambia en caliente."""
@@ -231,20 +306,72 @@ class BybitClient:
 
         return await asyncio.to_thread(_call)
 
-    async def get_last_closed_pnl(self, symbol: str) -> dict | None:
-        def _call() -> dict | None:
-            resp = self._http.get_closed_pnl(category="linear", symbol=symbol, limit=1)
+    async def get_open_interest_history(
+        self, symbol: str, interval: str, start: dt.datetime, end: dt.datetime
+    ) -> list[dict]:
+        """Open interest historico (publico). `interval`: 5min, 15min, 30min, 1h, 4h o 1d.
+        Bybit devuelve hasta 200 registros por pedido, del mas reciente al mas viejo."""
+        start_ms = int(start.timestamp() * 1000)
+        cursor_end = int(end.timestamp() * 1000)
+
+        def _call(end_ms: int) -> list[dict]:
+            resp = self._public_http.get_open_interest(
+                category="linear", symbol=symbol, intervalTime=interval, startTime=start_ms, endTime=end_ms, limit=200
+            )
             if resp.get("retCode") != 0:
                 raise RuntimeError(resp.get("retMsg", "Error desconocido de Bybit"))
-            items = resp["result"]["list"]
-            if not items:
-                return None
-            item = items[0]
+            return resp["result"]["list"]
+
+        by_ts: dict[int, float] = {}
+        while True:
+            batch = await asyncio.to_thread(_call, cursor_end)
+            if not batch:
+                break
+            for item in batch:
+                by_ts[int(item["timestamp"])] = float(item["openInterest"])
+            oldest = min(int(item["timestamp"]) for item in batch)
+            if oldest <= start_ms or len(batch) < 200:
+                break
+            cursor_end = oldest - 1
+            await asyncio.sleep(0.1)
+
+        return [
+            {"timestamp": dt.datetime.fromtimestamp(ts / 1000, tz=dt.timezone.utc), "value": value}
+            for ts, value in sorted(by_ts.items())
+            if start_ms <= ts
+        ]
+
+    async def get_wallet_balance(self) -> dict:
+        """Equity total de la cuenta unificada y PnL no realizado en USDT."""
+        def _call() -> dict:
+            resp = self._http.get_wallet_balance(accountType="UNIFIED")
+            if resp.get("retCode") != 0:
+                raise RuntimeError(resp.get("retMsg", "Error desconocido de Bybit"))
+            account = resp["result"]["list"][0]
+            usdt = next((c for c in account.get("coin", []) if c.get("coin") == "USDT"), {})
             return {
-                "avg_exit_price": float(item["avgExitPrice"]),
-                "closed_pnl": float(item["closedPnl"]),
-                "updated_time": dt.datetime.fromtimestamp(int(item["updatedTime"]) / 1000, tz=dt.timezone.utc),
+                "equity": float(account.get("totalEquity") or 0),  # incluye BTC/ETH regalados en Demo
+                "margin_balance": float(account.get("totalMarginBalance") or 0),  # solo lo que respalda el margen (USDT/USDC)
+                "available": float(account.get("totalAvailableBalance") or 0),
+                "unrealised_pnl": float(usdt.get("unrealisedPnl") or 0),
             }
+
+        return await asyncio.to_thread(_call)
+
+    async def get_closed_pnl_records(self, symbol: str, limit: int = 50) -> list[dict]:
+        """Ultimos cierres registrados por Bybit para el simbolo (del mas reciente al mas viejo)."""
+        def _call() -> list[dict]:
+            resp = self._http.get_closed_pnl(category="linear", symbol=symbol, limit=limit)
+            if resp.get("retCode") != 0:
+                raise RuntimeError(resp.get("retMsg", "Error desconocido de Bybit"))
+            return [
+                {
+                    "avg_exit_price": float(item["avgExitPrice"]),
+                    "closed_pnl": float(item["closedPnl"]),
+                    "updated_time": dt.datetime.fromtimestamp(int(item["updatedTime"]) / 1000, tz=dt.timezone.utc),
+                }
+                for item in resp["result"]["list"]
+            ]
 
         return await asyncio.to_thread(_call)
 

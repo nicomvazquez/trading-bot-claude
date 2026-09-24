@@ -14,10 +14,23 @@ logging.basicConfig(
 )
 
 
+def check_security() -> None:
+    """La base de datos no debe quedar con la contrasena por defecto. En mainnet es un error fatal."""
+    if settings.db_password in ("changeme", ""):
+        message = "DB_PASSWORD es la de por defecto: cambiala en .env (y en Postgres con ALTER USER)."
+        if not settings.bybit_demo:
+            raise RuntimeError(message + " En MAINNET no se puede iniciar así.")
+        logging.getLogger(__name__).warning(message)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_security()
     await init_db()
-    await orchestrator.start_all_active()
+    if settings.live_enabled:
+        await orchestrator.start_all_active()
+    else:
+        logging.getLogger(__name__).warning("MODO DEMOSTRACION: la operativa en vivo esta desactivada (LIVE_ENABLED=false)")
     yield
     await orchestrator.shutdown()
 

@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"  # solo desde este equipo (la app usa la red interna de Docker)
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +20,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"  # solo desde este equipo
 
   app:
     build:
@@ -32,7 +32,7 @@ services:
       DB_HOST: db
       REDIS_HOST: redis
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8080}:8080"  # APP_BIND=127.0.0.1 para no exponer el dashboard a la red
     volumes:
       - ./app:/app/app
     depends_on:
@@ -40,6 +40,27 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+
+  # Copia del dashboard con datos de EJEMPLO para ver los paneles llenos (no toca la base real ni opera).
+  # Uso: docker compose --profile demo up -d app-demo   ->   http://localhost:8081
+  app-demo:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_NAME: trading_demo
+      REDIS_HOST: redis
+      LIVE_ENABLED: "false"
+    ports:
+      - "${APP_BIND:-0.0.0.0}:8081:8080"
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   db_data:

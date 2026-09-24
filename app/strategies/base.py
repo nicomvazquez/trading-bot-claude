@@ -31,6 +31,7 @@ class Signal:
     stop_loss: float | None = None
     take_profit: float | None = None
     risk_pct: float | None = None  # % del equity a arriesgar; si es None, usa el default del RiskManager
+    limit_price: float | None = None  # solo para ordenes limit; si es None se usa el cierre de la vela de la senal
 
 
 class Strategy(ABC):
@@ -41,6 +42,11 @@ class Strategy(ABC):
     key: ClassVar[str]
     display_name: ClassVar[str]
     params_model: ClassVar[type[BaseModel]]
+    # datos ademas de las velas que la estrategia lee como columnas de ctx.candles:
+    # "funding" -> funding_rate ; "open_interest" -> open_interest
+    required_data: ClassVar[tuple[str, ...]] = ()
+    description: ClassVar[str] = ""  # una o dos frases: que hace la estrategia y cuando opera
+    version: ClassVar[str] = "1"  # subir cuando cambia la logica: queda registrado en cada backtest
 
     def __init__(self, params: BaseModel) -> None:
         self.params = params

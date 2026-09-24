@@ -13,14 +13,14 @@ _ATR_PERIOD = 14
 
 
 class IctSweepFvgParams(BaseModel):
-    risk_pct: float = Field(default=1.0, ge=0.1, le=10.0, description="% de equity a arriesgar por operacion")
-    rr_ratio: float = Field(default=2.0, ge=0.5, le=10.0, description="Take profit como multiplo del riesgo (R)")
+    risk_pct: float = Field(default=1.0, ge=0.1, le=10.0, description="% de equity a arriesgar por operación")
+    rr_ratio: float = Field(default=2.0, ge=0.5, le=10.0, description="Take profit como múltiplo del riesgo (R)")
     swing_n: int = Field(default=3, ge=2, le=10, description="Velas a cada lado para confirmar un swing (liquidez)")
-    liquidity_lookback: int = Field(default=48, ge=10, le=300, description="Cuantas velas atras buscar liquidez a barrer")
-    max_bars_after_sweep: int = Field(default=12, ge=3, le=60, description="Maximo de velas entre la barrida y la entrada")
+    liquidity_lookback: int = Field(default=48, ge=10, le=300, description="Cuántas velas atrás buscar liquidez a barrer")
+    max_bars_after_sweep: int = Field(default=12, ge=3, le=60, description="Máximo de velas entre la barrida y la entrada")
     displacement_atr_mult: float = Field(default=1.0, ge=0.0, le=5.0, description="Cuerpo minimo de la vela de desplazamiento (x ATR14, 0 = sin filtro)")
-    min_fvg_pct: float = Field(default=0.03, ge=0.0, le=2.0, description="Tamano minimo del FVG (% del precio)")
-    sl_buffer_pct: float = Field(default=0.05, ge=0.0, le=2.0, description="Margen del stop mas alla de la mecha de la barrida (%)")
+    min_fvg_pct: float = Field(default=0.03, ge=0.0, le=2.0, description="Tamaño mínimo del FVG (% del precio)")
+    sl_buffer_pct: float = Field(default=0.05, ge=0.0, le=2.0, description="Margen del stop más allá de la mecha de la barrida (%)")
     use_htf_bias: bool = Field(default=True, description="Filtrar por sesgo de estructura en 4h")
     htf_swing_n: int = Field(default=2, ge=1, le=5, description="Velas de 4h a cada lado para confirmar un swing del sesgo")
     use_killzones: bool = Field(default=True, description="Operar solo dentro de las kill zones (hora de Nueva York)")
@@ -72,6 +72,11 @@ class IctSweepFvgStrategy(Strategy):
 
     key = "ict_sweep_fvg"
     display_name = "ICT: Barrida de liquidez + FVG"
+    description = (
+        "Espera que el precio barra un máximo/mínimo reciente (liquidez) y deje un Fair Value Gap; entra en el "
+        "retroceso al FVG a favor del sesgo de 4h, solo en las kill zones de Londres y Nueva York. Stop bajo la "
+        "mecha de la barrida y take profit en múltiplo del riesgo."
+    )
     params_model = IctSweepFvgParams
 
     def __init__(self, params: BaseModel) -> None:

@@ -45,3 +45,25 @@ def test_approved_entry_returns_sized_qty() -> None:
     result = rm.evaluate_entry(Signal(action="buy", stop_loss=90.0, risk_pct=2.0), equity=1000.0, price=100.0, daily_pnl_pct=0.0, open_positions_count=0)
     assert result.approved
     assert abs(result.qty - (20.0 / 10.0)) < 1e-9
+
+
+def test_fixed_notional_mode_ignores_the_stop() -> None:
+    qty = position_size(1000.0, 100.0, stop_loss=95.0, risk_pct=1.0, mode="fixed_notional_pct", notional_pct=50.0)
+    assert qty == 5.0
+
+
+def test_max_position_pct_caps_notional_below_leverage_cap() -> None:
+    qty = position_size(1000.0, 100.0, stop_loss=99.99, risk_pct=1.0, max_leverage=10.0, max_position_pct=50.0)
+    assert qty * 100.0 == 500.0
+
+
+def test_costs_per_unit_reduce_the_size() -> None:
+    plain = position_size(1000.0, 100.0, 95.0, 1.0)
+    costed = position_size(1000.0, 100.0, 95.0, 1.0, cost_per_unit=1.0)
+    assert costed == 10.0 / 6.0 and costed < plain
+
+
+def test_non_positive_equity_or_price_gives_zero_size() -> None:
+    assert position_size(0.0, 100.0, 95.0, 1.0) == 0.0
+    assert position_size(-50.0, 100.0, 95.0, 1.0) == 0.0
+    assert position_size(1000.0, 0.0, 95.0, 1.0) == 0.0
