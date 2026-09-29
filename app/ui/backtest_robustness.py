@@ -15,8 +15,6 @@ from app.backtest.robustness import (
     SensitivityResult,
     heatmap_matrix,
     neighbor_comparison,
-    numeric_params,
-    param_bounds,
     run_sensitivity,
     stability_summary,
 )
@@ -25,7 +23,7 @@ from app.ui import backtest_charts as charts
 from app.ui import backtest_widgets as w
 from app.ui.backtest_axes import NONE, AxesSelector, default_range, within_bounds  # noqa: F401
 from app.ui.backtest_config_panel import ConfigPanel
-from app.ui.backtest_format import METRIC_LABELS, NEG_CLASS, fmt_pct, fmt_usd, format_metric, sign_class
+from app.ui.backtest_format import METRIC_LABELS, NEG_CLASS, fmt_pct, format_metric, sign_class
 
 logger = logging.getLogger(__name__)
 _SIGNED_COLUMNS = ("total_return_pct", "cagr_pct", "expectancy")

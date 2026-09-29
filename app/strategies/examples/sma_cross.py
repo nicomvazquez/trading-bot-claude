@@ -1,4 +1,3 @@
-import numpy as np
 from pydantic import BaseModel, Field
 
 from app.strategies.base import Signal, Strategy, StrategyContext

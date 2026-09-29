@@ -1,6 +1,5 @@
 """Validacion y auditoria de calidad de las velas antes de simular."""
 
-import datetime as dt
 from dataclasses import asdict, dataclass, field
 
 import numpy as np

@@ -1,7 +1,6 @@
 import datetime as dt
 from dataclasses import dataclass, field
 
-import numpy as np
 import pandas as pd
 
 from app.backtest.config import ConfigError, ExecutionConfig, RiskConfig

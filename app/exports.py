@@ -93,7 +93,7 @@ def to_xlsx(tables: list[Table]) -> bytes:
             sheet.append(values)
             for i, v in enumerate(values):
                 widths[i] = max(widths[i], len(v.strftime("%Y-%m-%d %H:%M") if isinstance(v, dt.datetime) else str(v if v is not None else "")))
-        for i, cells in enumerate(sheet.iter_cols(min_row=2, max_row=sheet.max_row), start=1):
+        for cells in sheet.iter_cols(min_row=2, max_row=sheet.max_row):
             for cell in cells:
                 if isinstance(cell.value, dt.datetime):
                     cell.number_format = "yyyy-mm-dd hh:mm"

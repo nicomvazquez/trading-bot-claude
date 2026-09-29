@@ -115,7 +115,7 @@ def render_nav(active_path: str) -> None:
                             ui.label(label)
 
             with ui.column().classes("w-full gap-2 rounded-xl p-3").style("background:#f6f7fa"):
-                env = ui.html(
+                ui.html(
                     f'<span class="pill pill-{"warn" if demo else "bad"}"><span class="dot"></span>'
                     f'{"Demo Trading" if demo else "MAINNET · dinero real"}</span>',
                     sanitize=False,

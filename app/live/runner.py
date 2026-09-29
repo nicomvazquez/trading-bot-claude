@@ -225,7 +225,11 @@ class StrategyRunner:
         if open_trade is not None:
             if open_trade.side == desired_side:
                 return  # ya estamos en esa direccion, no duplicar entrada
-            await self._close_position(instance, open_trade, reason="flip")
+            if not await self._close_position(instance, open_trade, reason="flip"):
+                # no se pudo cerrar la posicion contraria: NUNCA abrir la nueva sin haber cerrado la anterior
+                # (si se ignora el fallo y se sigue igual, se termina con dos posiciones opuestas y un trade
+                # huerfano en la base, que ademas se "adopta" como ajeno en la proxima reconciliacion)
+                return
 
         limits = await _load_limits()
         daily_pnl_pct = await self._daily_pnl_pct(instance)
@@ -291,13 +295,17 @@ class StrategyRunner:
             + (f" · {signal.reason}" if signal.reason else ""),
         )
 
-    async def _close_position(self, instance: StrategyInstance, open_trade: Trade, reason: str) -> None:
+    async def _close_position(self, instance: StrategyInstance, open_trade: Trade, reason: str) -> bool:
+        """Devuelve True si la orden de cierre se envio con exito. El llamador NUNCA debe abrir una posicion
+        nueva (flip) sin comprobar este resultado: seguir de largo dejaria dos posiciones opuestas abiertas
+        en el exchange y el trade viejo huerfano en la base."""
         side = "Sell" if open_trade.side == "long" else "Buy"
         try:
             await bybit_client.place_market_order(instance.symbol, side, open_trade.qty, reduce_only=True)
-        except Exception:
+        except Exception as exc:
             logger.exception("Instancia %s: fallo al cerrar la posicion", self.instance_id)
-            return
+            await log_event(self.instance_id, "error", f"No se pudo cerrar la posición ({reason}): {exc}")
+            return False
 
         closed_pnl = None
         for _ in range(4):  # Bybit tarda un instante en publicar el cierre
@@ -315,6 +323,7 @@ class StrategyRunner:
         logger.info("Instancia %s: posicion cerrada (%s)", self.instance_id, reason)
         pnl_text = f", PnL {closed_pnl.closed_pnl:+.4f} USD" if closed_pnl else ", PnL no disponible aún"
         await log_event(self.instance_id, "closed", f"Cerrada por {reason}{pnl_text}")
+        return True
 
     async def _current_equity(self, instance: StrategyInstance) -> float:
         async with async_session() as session:
