@@ -16,12 +16,6 @@ services:
       timeout: 5s
       retries: 10
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"  # solo desde este equipo
-
   app:
     build:
       context: .
@@ -30,7 +24,6 @@ services:
     env_file: .env
     environment:
       DB_HOST: db
-      REDIS_HOST: redis
     ports:
       - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8080}:8080"  # APP_BIND=127.0.0.1 para no exponer el dashboard a la red
     volumes:
@@ -38,8 +31,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # Copia del dashboard con datos de EJEMPLO para ver los paneles llenos (no toca la base real ni opera).
   # Uso: docker compose --profile demo up -d app-demo   ->   http://localhost:8081
@@ -52,7 +49,6 @@ services:
     environment:
       DB_HOST: db
       DB_NAME: trading_demo
-      REDIS_HOST: redis
       LIVE_ENABLED: "false"
     ports:
       - "${APP_BIND:-0.0.0.0}:8081:8080"
@@ -61,6 +57,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   db_data:

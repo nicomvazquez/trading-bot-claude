@@ -347,14 +347,15 @@ def _side_comparison(closed: list[TradeRecord]) -> None:
     ]
     for label, fn in spec:
         rows.append({"metric": label, "long": fn(stats["long"]), "short": fn(stats["short"])})
-    ui.table(
-        columns=[
-            {"name": "metric", "label": "", "field": "metric", "align": "left"},
-            {"name": "long", "label": "Long", "field": "long", "align": "right"},
-            {"name": "short", "label": "Short", "field": "short", "align": "right"},
-        ],
-        rows=rows, row_key="metric",
-    ).props("flat dense hide-pagination").classes("w-full")
+    with ui.element("div").classes("w-full overflow-x-auto"):
+        ui.table(
+            columns=[
+                {"name": "metric", "label": "", "field": "metric", "align": "left"},
+                {"name": "long", "label": "Long", "field": "long", "align": "right"},
+                {"name": "short", "label": "Short", "field": "short", "align": "right"},
+            ],
+            rows=rows, row_key="metric",
+        ).props("flat dense hide-pagination").classes("w-full")
 
 
 def _trade_analysis(subset: list[TradeRecord], label: str) -> None:
@@ -614,14 +615,15 @@ def render_runs_table(runs: list) -> None:
         {"name": "trades", "label": "Operaciones", "field": "trades", "align": "right", "sortable": True},
         {"name": "params", "label": "Parámetros", "field": "params", "align": "left"},
     ]
-    table = ui.table(columns=columns, rows=rows, row_key="id", pagination=10).props("flat dense").classes("w-full")
-    table.add_slot("body-cell-retorno", """
-        <q-td :props="props" class="font-medium" :class="props.value > 0 ? '%s' : (props.value < 0 ? '%s' : '')">
-            {{ props.value == null ? '—' : (props.value > 0 ? '+' : '') + props.value.toFixed(2) + '%%' }}
-        </q-td>
-    """ % (POS_CLASS, NEG_CLASS))
-    table.add_slot("body-cell-params", """
-        <q-td :props="props" style="max-width: 320px">
-            <div class="ellipsis text-gray-600">{{ props.value }}<q-tooltip>{{ props.value }}</q-tooltip></div>
-        </q-td>
-    """)
+    with ui.element("div").classes("w-full overflow-x-auto"):
+        table = ui.table(columns=columns, rows=rows, row_key="id", pagination=10).props("flat dense").classes("w-full")
+        table.add_slot("body-cell-retorno", """
+            <q-td :props="props" class="font-medium" :class="props.value > 0 ? '%s' : (props.value < 0 ? '%s' : '')">
+                {{ props.value == null ? '—' : (props.value > 0 ? '+' : '') + props.value.toFixed(2) + '%%' }}
+            </q-td>
+        """ % (POS_CLASS, NEG_CLASS))
+        table.add_slot("body-cell-params", """
+            <q-td :props="props" style="max-width: 320px">
+                <div class="ellipsis text-gray-600">{{ props.value }}<q-tooltip>{{ props.value }}</q-tooltip></div>
+            </q-td>
+        """)

@@ -4,13 +4,14 @@ import logging
 from nicegui import ui
 from pydantic import ValidationError
 
-from app.backtest.config import ConfigError
+from app.backtest.config import BacktestConfig, ConfigError
 from app.backtest.engine import DataError
 from app.backtest.history import run_fields
 from app.backtest.monte_carlo import run_monte_carlo
 from app.backtest.service import BacktestOutput, run_backtest as run_backtest_service
 from app.db.base import async_session
 from app.db.models import BacktestRun
+from app.live.queries import get_instance
 from app.ui import backtest_widgets as w
 from app.ui.backtest_config_panel import ConfigPanel
 from app.ui.backtest_robustness import build_robustness_tab
@@ -45,7 +46,7 @@ def _friendly_error(exc: Exception) -> str:
 
 
 @ui.page("/backtesting")
-async def backtesting_page() -> None:
+async def backtesting_page(instance_id: int | None = None) -> None:
     render_nav("/backtesting")
     state: dict = {"output": None, "params": None}
 
@@ -55,6 +56,19 @@ async def backtesting_page() -> None:
     ):
 
         panel = ConfigPanel()
+        if instance_id is not None:
+            instance = await get_instance(instance_id)
+            if instance is None:
+                ui.notify("La instancia ya no existe.", type="warning")
+            else:
+                panel.load(
+                    BacktestConfig(symbol=instance.symbol, timeframe=instance.timeframe, initial_capital=instance.initial_capital),
+                    instance.strategy_key, instance.params,
+                )
+                ui.notify(
+                    f"Cargados el símbolo, timeframe, capital y parámetros de «{instance.name}». "
+                    "Ajustá el período y los costos de ejecución antes de correr.", type="info",
+                )
         with ui.row().classes("w-full justify-end"):
             run_button = ui.button("Ejecutar backtest", icon="play_arrow").props("unelevated no-caps")
 

@@ -275,9 +275,10 @@ def build_history_tab(
                     {"name": "trades", "label": "Operaciones", "field": "trades", "align": "right", "sortable": True},
                     {"name": "completa", "label": "Datos completos", "field": "completa", "align": "left"},
                 ]
-                table = ui.table(columns=columns, rows=rows, row_key="id", selection="multiple", pagination=10).props("flat dense").classes("w-full")
-                table.add_slot("body-cell-retorno", RET_SLOT)
-                table.on("selection", lambda _: update_buttons())
+                with ui.element("div").classes("w-full overflow-x-auto"):
+                    table = ui.table(columns=columns, rows=rows, row_key="id", selection="multiple", pagination=10).props("flat dense").classes("w-full")
+                    table.add_slot("body-cell-retorno", RET_SLOT)
+                    table.on("selection", lambda _: update_buttons())
                 state["table"] = table
         update_buttons()
 
@@ -327,7 +328,8 @@ def render_comparison(runs: list[BacktestRun]) -> None:
                 {"name": f"v{i}", "label": s, "field": f"v{i}", "align": "left"} for i, s in enumerate(shorts)
             ]
             rows = [{"label": d["label"], **{f"v{i}": _value(d["key"], x) for i, x in enumerate(d["values"])}} for d in diff]
-            ui.table(columns=columns, rows=rows, row_key="label").props("flat dense hide-pagination").classes("w-full")
+            with ui.element("div").classes("w-full overflow-x-auto"):
+                ui.table(columns=columns, rows=rows, row_key="label").props("flat dense hide-pagination").classes("w-full")
 
     with w.bordered_card():
         w.section_title("Métricas lado a lado", "Todas sobre PnL neto de costos, según la configuración de cada corrida.")
@@ -338,7 +340,8 @@ def render_comparison(runs: list[BacktestRun]) -> None:
             {"grupo": m["group"], "label": m["label"], **{f"v{i}": format_metric(m["key"], val, views[i].metrics) for i, val in enumerate(m["values"])}}
             for m in metric_rows(views, METRIC_GROUPS, METRIC_LABELS)
         ]
-        ui.table(columns=columns, rows=rows, row_key="label", pagination=0).props("flat dense hide-pagination").classes("w-full")
+        with ui.element("div").classes("w-full overflow-x-auto"):
+            ui.table(columns=columns, rows=rows, row_key="label", pagination=0).props("flat dense hide-pagination").classes("w-full")
 
     series = []
     for r, name, short in zip(runs, names, shorts, strict=True):

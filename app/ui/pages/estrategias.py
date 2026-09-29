@@ -241,6 +241,10 @@ async def estrategias_page() -> None:
             _param_chips(strategy_cls, instance.params)
 
             with ui.row().classes("w-full items-center gap-1"):
+                ui.button(
+                    "Backtestear", icon="science",
+                    on_click=lambda i=instance: ui.navigate.to(f"/backtesting?instance_id={i.id}"),
+                ).props("flat dense no-caps")
                 ui.button("Editar", icon="edit", on_click=lambda i=instance: open_editor(root, i.strategy_key, refresh, i)).props("flat dense no-caps")
                 ui.button("Duplicar", icon="content_copy", on_click=lambda i=instance: duplicate(i)).props("flat dense no-caps")
                 delete_btn = ui.button("Eliminar", icon="delete", on_click=lambda i=instance: delete(i)).props("flat dense no-caps color=negative")

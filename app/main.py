@@ -47,6 +47,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Bot Trading - Bybit Futures", lifespan=lifespan)
 
+
+@app.get("/health")
+async def health() -> dict:
+    """Usado por el healthcheck de Docker: confirma que el proceso responde y que puede hablar con la base.
+    Si la base no responde, FastAPI devuelve 500 y el contenedor se marca unhealthy."""
+    from sqlalchemy import text
+
+    from app.db.base import engine
+
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+    return {"status": "ok"}
+
+
 # Registra las paginas (cada modulo llama a @ui.page al importarse).
 from app.ui.pages import ayuda, backtesting, configuracion, estrategias, operaciones, overview  # noqa: E402,F401
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import plotly.graph_objects as go
@@ -28,6 +29,17 @@ PNL_SLOT = r"""
 <q-td :props="props" :class="props.row.pnl_raw > 0 ? 'text-[#0b7a3b]' : (props.row.pnl_raw < 0 ? 'text-[#d03b3b]' : '')">
   <span class="num">{{ props.value }}</span>
 </q-td>"""
+UPNL_SLOT = r"""
+<q-td :props="props" :class="props.row.upnl_raw > 0 ? 'text-[#0b7a3b]' : (props.row.upnl_raw < 0 ? 'text-[#d03b3b]' : '')">
+  <span class="num">{{ props.value }}</span>
+</q-td>"""
+
+
+async def _position_snapshot(trade_id: int, symbol: str) -> tuple[int, dict | None]:
+    try:
+        return trade_id, await bybit_client.get_open_position(symbol)
+    except Exception:  # noqa: BLE001
+        return trade_id, None
 
 
 def _curve_figure(points: list, initial: float) -> go.Figure:
@@ -61,12 +73,13 @@ def _alert(kind: str, text: str, link: tuple[str, str] | None = None) -> None:
 
 
 def _table(columns: list[tuple[str, str]], rows: list[dict], left: tuple[str, ...] = (), slots: dict | None = None) -> None:
-    table = ui.table(
-        columns=[{"name": k, "label": label, "field": k, "align": "left" if k in left else "right"} for k, label in columns],
-        rows=rows, row_key="id",
-    ).props("flat dense hide-pagination").classes("w-full")
-    for name, template in (slots or {}).items():
-        table.add_slot(f"body-cell-{name}", template)
+    with ui.element("div").classes("w-full overflow-x-auto"):
+        table = ui.table(
+            columns=[{"name": k, "label": label, "field": k, "align": "left" if k in left else "right"} for k, label in columns],
+            rows=rows, row_key="id",
+        ).props("flat dense hide-pagination").classes("w-full")
+        for name, template in (slots or {}).items():
+            table.add_slot(f"body-cell-{name}", template)
 
 
 @ui.page("/")
@@ -108,6 +121,8 @@ def overview_page() -> None:
             running_capital += trade.pnl or 0.0
             curve.append((trade.closed_at, running_capital))
         names = {i.id: i.name for i in instances}
+        open_trades = [t for t in trades if t.closed_at is None]
+        snapshots = dict(await asyncio.gather(*[_position_snapshot(t.id, t.symbol) for t in open_trades])) if open_trades else {}
 
         problems = []
         for i in instances:
@@ -139,7 +154,7 @@ def overview_page() -> None:
                 w._tile("PnL de hoy", fmt_usd(stats["pnl_today"], signed=True), sub="Desde las 00:00, hora argentina", color_class=sign_class(stats["pnl_today"]))
                 w._tile("Posiciones abiertas", str(stats["open"]),
                         sub=f"No realizado {fmt_usd(wallet['unrealised_pnl'], signed=True)}" if wallet else None)
-            with ui.element("div").classes("grid grid-cols-3 gap-3 w-full"):
+            with ui.element("div").classes("grid grid-cols-1 sm:grid-cols-3 gap-3 w-full"):
                 w._tile("Win rate", fmt_pct(stats["win_rate_pct"]) if stats["win_rate_pct"] is not None else "—",
                         sub="% de trades ganadores")
                 w._tile("Profit factor", f"{stats['profit_factor']:.2f}" if stats["profit_factor"] else "—",
@@ -174,19 +189,31 @@ def overview_page() -> None:
                        rows, left=("name", "strategy", "market", "status"), slots={"status": STATUS_SLOT, "pnl": PNL_SLOT})
 
             with w.bordered_card():
-                w.section_title("Posiciones abiertas")
-                open_trades = [t for t in trades if t.closed_at is None]
+                w.section_title(
+                    "Posiciones abiertas",
+                    "Precio actual y PnL no realizado según Bybit. Si no se pudo consultar (por ejemplo, un problema de red), se muestra «—».",
+                )
                 if not open_trades:
                     ui.label("No hay posiciones abiertas.").classes("text-sm text-gray-500")
                 else:
+                    rows = []
+                    for t in open_trades:
+                        snap = snapshots.get(t.id)
+                        rows.append({
+                            "id": t.id, "inst": names.get(t.strategy_instance_id, "?"), "symbol": t.symbol, "side": t.side,
+                            "qty": t.qty, "entry": f"{t.entry_price:,.2f}",
+                            "current": f"{snap['mark_price']:,.2f}" if snap else "—",
+                            "upnl": fmt_usd(snap["unrealised_pnl"], signed=True) if snap else "—",
+                            "upnl_raw": snap["unrealised_pnl"] if snap else 0,
+                            "sl": f"{t.stop_loss:,.2f}" if t.stop_loss else "—",
+                            "tp": f"{t.take_profit:,.2f}" if t.take_profit else "—",
+                            "since": fmt(t.opened_at, "%d/%m %H:%M"),
+                        })
                     _table(
                         [("inst", "Instancia"), ("symbol", "Símbolo"), ("side", "Lado"), ("qty", "Cantidad"), ("entry", "Entrada"),
-                         ("sl", "Stop"), ("tp", "Take profit"), ("since", "Desde")],
-                        [{"id": t.id, "inst": names.get(t.strategy_instance_id, "?"), "symbol": t.symbol, "side": t.side,
-                          "qty": t.qty, "entry": f"{t.entry_price:,.2f}", "sl": f"{t.stop_loss:,.2f}" if t.stop_loss else "—",
-                          "tp": f"{t.take_profit:,.2f}" if t.take_profit else "—",
-                          "since": fmt(t.opened_at, "%d/%m %H:%M")} for t in open_trades],
-                        left=("inst", "symbol", "side"), slots={"side": SIDE_SLOT},
+                         ("current", "Precio actual"), ("upnl", "PnL no realizado"), ("sl", "Stop"), ("tp", "Take profit"), ("since", "Desde")],
+                        rows,
+                        left=("inst", "symbol", "side"), slots={"side": SIDE_SLOT, "upnl": UPNL_SLOT},
                     )
 
     ui.timer(0.1, refresh, once=True)

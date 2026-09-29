@@ -34,7 +34,7 @@ def operaciones_page() -> None:
                 side = ui.select({ALL: "Long y short", "long": "Long", "short": "Short"}, value=ALL, label="Lado").props(
                     "outlined dense").classes("w-40")
                 ui.button("Actualizar", icon="refresh", on_click=lambda: load()).props("flat no-caps")
-            summary = ui.row().classes("w-full gap-6 text-sm")
+            summary = ui.element("div").classes("grid grid-cols-2 md:grid-cols-4 gap-3 w-full")
         with w.bordered_card():
             with ui.row().classes("w-full items-start justify-between no-wrap"):
                 w.section_title("Trades", "Cada fila es una posición completa (entrada y salida). La descarga respeta los filtros de arriba.")
@@ -63,55 +63,57 @@ def operaciones_page() -> None:
         stats = summarize(rows)
         summary.clear()
         with summary:
-            ui.label(f"{len(rows)} trades ({stats['open']} abiertos)")
-            ui.label(f"PnL: {fmt_usd(stats['total_pnl'], signed=True)}").classes(sign_class(stats["total_pnl"]))
-            ui.label(f"Win rate: {fmt_pct(stats['win_rate_pct']) if stats['win_rate_pct'] is not None else '—'}")
-            ui.label(f"Profit factor: {stats['profit_factor']:.2f}" if stats["profit_factor"] else "Profit factor: —")
+            w._tile("Trades", str(len(rows)), f"{stats['open']} abiertos")
+            w._tile("PnL", fmt_usd(stats["total_pnl"], signed=True), color_class=sign_class(stats["total_pnl"]))
+            w._tile("Win rate", fmt_pct(stats["win_rate_pct"]) if stats["win_rate_pct"] is not None else "—", "% de trades ganadores")
+            w._tile("Profit factor", f"{stats['profit_factor']:.2f}" if stats["profit_factor"] else "—", "ganancias / pérdidas")
 
         trades_box.clear()
         with trades_box:
             if not rows:
                 w.empty_state("receipt_long", "No hay trades con esos filtros.")
             else:
-                table = ui.table(
-                    columns=[{"name": k, "label": label, "field": k, "align": "left" if k in ("inst", "side", "reason", "opened", "closed_at") else "right",
-                              "sortable": k in ("opened", "pnl")}
-                             for k, label in [("opened", "Apertura"), ("inst", "Instancia"), ("symbol", "Símbolo"), ("side", "Lado"),
-                                              ("qty", "Cantidad"), ("entry", "Entrada"), ("exit", "Salida"), ("sl", "Stop"), ("tp", "TP"),
-                                              ("pnl", "PnL (USD)"), ("fees", "Comisiones"), ("funding", "Funding"),
-                                              ("reason", "Motivo"), ("closed_at", "Cierre")]],
-                    rows=[{
-                        "id": t.id, "opened": _fmt_dt(t.opened_at), "inst": state["names"].get(t.strategy_instance_id, "?"),
-                        "symbol": t.symbol, "side": t.side, "qty": t.qty, "entry": _fmt_price(t.entry_price),
-                        "exit": _fmt_price(t.exit_price), "sl": _fmt_price(t.stop_loss), "tp": _fmt_price(t.take_profit),
-                        "pnl": None if t.pnl is None else round(t.pnl, 4),
-                        "fees": fmt_usd(-t.fees) if t.fees is not None else "—",
-                        "funding": fmt_usd(t.funding, signed=True) if t.funding is not None else "—",
-                        "reason": EXIT_REASON_LABELS.get(t.exit_reason, t.exit_reason) if t.exit_reason else ("Abierta" if t.closed_at is None else "—"),
-                        "closed_at": _fmt_dt(t.closed_at),
-                    } for t in rows],
-                    row_key="id", pagination=25,
-                ).props("flat dense").classes("w-full")
-                table.add_slot("body-cell-side", r"""<q-td :props="props"><span :class="props.value === 'long' ? 'side-long' : 'side-short'">{{ props.value === 'long' ? '▲ Long' : '▼ Short' }}</span></q-td>""")
-                table.add_slot("body-cell-pnl", r"""
-                    <q-td :props="props" :class="props.value > 0 ? 'text-[#006300]' : (props.value < 0 ? 'text-[#d03b3b]' : '')">
-                        {{ props.value === null ? '—' : (props.value > 0 ? '+' : '') + props.value.toFixed(4) }}
-                    </q-td>""")
+                with ui.element("div").classes("w-full overflow-x-auto"):
+                    table = ui.table(
+                        columns=[{"name": k, "label": label, "field": k, "align": "left" if k in ("inst", "side", "reason", "opened", "closed_at") else "right",
+                                  "sortable": k in ("opened", "pnl")}
+                                 for k, label in [("opened", "Apertura"), ("inst", "Instancia"), ("symbol", "Símbolo"), ("side", "Lado"),
+                                                  ("qty", "Cantidad"), ("entry", "Entrada"), ("exit", "Salida"), ("sl", "Stop"), ("tp", "TP"),
+                                                  ("pnl", "PnL (USD)"), ("fees", "Comisiones"), ("funding", "Funding"),
+                                                  ("reason", "Motivo"), ("closed_at", "Cierre")]],
+                        rows=[{
+                            "id": t.id, "opened": _fmt_dt(t.opened_at), "inst": state["names"].get(t.strategy_instance_id, "?"),
+                            "symbol": t.symbol, "side": t.side, "qty": t.qty, "entry": _fmt_price(t.entry_price),
+                            "exit": _fmt_price(t.exit_price), "sl": _fmt_price(t.stop_loss), "tp": _fmt_price(t.take_profit),
+                            "pnl": None if t.pnl is None else round(t.pnl, 4),
+                            "fees": fmt_usd(-t.fees) if t.fees is not None else "—",
+                            "funding": fmt_usd(t.funding, signed=True) if t.funding is not None else "—",
+                            "reason": EXIT_REASON_LABELS.get(t.exit_reason, t.exit_reason) if t.exit_reason else ("Abierta" if t.closed_at is None else "—"),
+                            "closed_at": _fmt_dt(t.closed_at),
+                        } for t in rows],
+                        row_key="id", pagination=25,
+                    ).props("flat dense").classes("w-full")
+                    table.add_slot("body-cell-side", r"""<q-td :props="props"><span :class="props.value === 'long' ? 'side-long' : 'side-short'">{{ props.value === 'long' ? '▲ Long' : '▼ Short' }}</span></q-td>""")
+                    table.add_slot("body-cell-pnl", r"""
+                        <q-td :props="props" :class="props.value > 0 ? 'text-[#006300]' : (props.value < 0 ? 'text-[#d03b3b]' : '')">
+                            {{ props.value === null ? '—' : (props.value > 0 ? '+' : '') + props.value.toFixed(4) }}
+                        </q-td>""")
 
         orders_box.clear()
         with orders_box:
             if not state["orders"]:
                 ui.label("Todavía no se enviaron órdenes.").classes("text-sm text-gray-500")
             else:
-                ui.table(
-                    columns=[{"name": k, "label": label, "field": k, "align": "left" if k in ("created", "inst", "side", "type", "status") else "right"}
-                             for k, label in [("created", "Fecha"), ("inst", "Instancia"), ("symbol", "Símbolo"), ("side", "Lado"),
-                                              ("type", "Tipo"), ("qty", "Cantidad"), ("price", "Precio"), ("status", "Estado")]],
-                    rows=[{"id": o.id, "created": _fmt_dt(o.created_at), "inst": state["names"].get(o.strategy_instance_id, "?"),
-                           "symbol": o.symbol, "side": o.side, "type": o.order_type, "qty": o.qty, "price": _fmt_price(o.price),
-                           "status": o.status} for o in state["orders"]],
-                    row_key="id", pagination=15,
-                ).props("flat dense").classes("w-full")
+                with ui.element("div").classes("w-full overflow-x-auto"):
+                    ui.table(
+                        columns=[{"name": k, "label": label, "field": k, "align": "left" if k in ("created", "inst", "side", "type", "status") else "right"}
+                                 for k, label in [("created", "Fecha"), ("inst", "Instancia"), ("symbol", "Símbolo"), ("side", "Lado"),
+                                                  ("type", "Tipo"), ("qty", "Cantidad"), ("price", "Precio"), ("status", "Estado")]],
+                        rows=[{"id": o.id, "created": _fmt_dt(o.created_at), "inst": state["names"].get(o.strategy_instance_id, "?"),
+                               "symbol": o.symbol, "side": o.side, "type": o.order_type, "qty": o.qty, "price": _fmt_price(o.price),
+                               "status": o.status} for o in state["orders"]],
+                        row_key="id", pagination=15,
+                    ).props("flat dense").classes("w-full")
 
     async def load() -> None:
         instances = await load_instances()

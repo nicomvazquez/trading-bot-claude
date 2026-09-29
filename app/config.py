@@ -10,9 +10,6 @@ class Settings(BaseSettings):
     db_user: str = "trading_bot"
     db_password: str = "changeme"
 
-    redis_host: str = "localhost"
-    redis_port: int = 6379
-
     # Entorno con el que arranca el proceso. Una vez arriba, el entorno REALMENTE activo lo decide
     # BotSettings.bybit_env (elegido desde Configuración) — ver app.live.environment.sync_from_db,
     # que lo aplica en el arranque y lo mantiene si ya se habia elegido mainnet antes de un reinicio.

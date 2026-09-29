@@ -11,6 +11,11 @@ async def load_instances() -> list[StrategyInstance]:
         return list((await session.execute(select(StrategyInstance).order_by(StrategyInstance.id))).scalars())
 
 
+async def get_instance(instance_id: int) -> StrategyInstance | None:
+    async with async_session() as session:
+        return await session.get(StrategyInstance, instance_id)
+
+
 async def load_trades() -> list[Trade]:
     async with async_session() as session:
         return list((await session.execute(select(Trade).order_by(Trade.opened_at.desc()))).scalars())

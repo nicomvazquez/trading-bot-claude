@@ -22,7 +22,7 @@ Todo corre en un solo programa (Python) con una base de datos PostgreSQL, dentro
 Desde la carpeta del proyecto:
 
 ```bash
-docker compose up -d          # arranca la base de datos, Redis y la app
+docker compose up -d          # arranca la base de datos y la app
 ```
 
 Después abrí **http://localhost:8080** (o `http://IP-DEL-SERVIDOR:8080` desde otro equipo de tu red).
@@ -47,7 +47,7 @@ Después abrí **http://localhost:8080** (o `http://IP-DEL-SERVIDOR:8080` desde 
 
 ## 3. El mapa de pantallas
 
-El menú de la izquierda tiene cinco pantallas. Abajo, una caja muestra el entorno (**Demo Trading** o **MAINNET**), cuántas instancias corren y una advertencia si el kill-switch está activo. En pantallas chicas, el menú se abre con el botón ☰.
+El menú de la izquierda tiene seis pantallas (Resumen, Operaciones, Estrategias, Backtesting, Configuración y Ayuda). Abajo, una caja muestra el entorno (**Demo Trading** o **MAINNET**), cuántas instancias corren y una advertencia si el kill-switch está activo. En pantallas chicas, el menú se abre con el botón ☰.
 
 ### Horarios
 
@@ -63,7 +63,7 @@ Es el tablero: cómo está la cuenta y las estrategias ahora. Se actualiza solo 
 - **Balance de margen:** lo que respalda tus posiciones (USDT y USDC). Debajo, el *Disponible*. Pasá el mouse por el ícono ℹ para ver el *equity total*, que suma además otras monedas de la cuenta (en Demo, Bybit regala 1 BTC y 1 ETH que **no** cuentan como margen). Por eso el equity total es bastante mayor que el balance de margen.
 - **PnL realizado:** suma de las ganancias y pérdidas de los trades **cerrados por el bot**, según lo que informa Bybit (ya con comisiones).
 - **PnL de hoy:** lo mismo pero solo de los trades cerrados desde las 00:00 de hoy, **hora argentina**.
-- **Posiciones abiertas** y su PnL no realizado.
+- **Posiciones abiertas:** entrada, precio actual y PnL no realizado (consultados a Bybit en cada actualización; si no se pudo consultar, muestra «—» sin romper el resto de la pantalla), stop-loss y take-profit.
 - **Win rate, Profit factor e Instancias** (corriendo / totales).
 - **Capital realizado:** una curva con el capital inicial de las instancias activas más el PnL de los trades cerrados. No incluye la posición abierta, así que solo se mueve al cerrar operaciones.
 - **Instancias** y **Posiciones abiertas**: tablas con el estado de cada una (Corriendo, Sin runner, Apagada), su capital, PnL y lado de la posición (▲ Long / ▼ Short).
@@ -101,6 +101,7 @@ Acá se crean y controlan las instancias. Una **instancia** es una estrategia ya
 **Acciones:**
 
 - **Activa** (interruptor): enciende o apaga la instancia. Al encender, **espera la próxima vela cerrada** antes de operar (ver 4.2).
+- **Backtestear:** abre Backtesting con el símbolo, timeframe, capital y parámetros de esta instancia ya cargados. Solo precarga eso: el período y los costos de ejecución quedan en sus valores por defecto, ajustalos antes de correr.
 - **Editar:** cambia cualquier valor. Si está corriendo, se reinicia con los nuevos valores y **conserva la posición abierta**.
 - **Duplicar:** crea una copia apagada, para probar variantes.
 - **Eliminar:** solo si está apagada y no tiene trades. Si tiene historial, no se elimina, para no perder ese registro.
@@ -112,12 +113,15 @@ El laboratorio para probar estrategias con datos históricos. Tiene su propia gu
 
 ### 3.5 Configuración
 
-- **Kill-switch:** interruptor de emergencia. Al activarlo, **ninguna estrategia abre operaciones nuevas**, y se aplica al instante. **No cierra** las posiciones que ya están abiertas: esas conservan su stop-loss y take-profit en Bybit, y las señales de cierre de las estrategias se siguen ejecutando.
-- **Conexión con Bybit:** entorno (Demo o MAINNET), si la API key está configurada, *Probar conexión* y *Pedir fondos demo* (solo en Demo).
+- **Kill-switch:** interruptor de emergencia. Al activarlo, **ninguna estrategia abre operaciones nuevas**, y se aplica al instante. **No cierra** las posiciones que ya están abiertas: esas conservan su stop-loss y take-profit en Bybit, y las señales de cierre de las estrategias se siguen ejecutando. Al activarlo se manda una alerta por Telegram (si están configuradas, ver abajo).
+- **Cerrar todas las posiciones:** botón de emergencia. Cierra YA, con una orden de mercado, **cada posición abierta de cualquier instancia**, esté corriendo o no. No apaga las instancias ni activa el kill-switch por sí solo. El diálogo de confirmación lista cada posición que se va a cerrar antes de mandar nada.
+- **Conexión con Bybit:** entorno activo (Demo Trading o MAINNET) y si la API key de ese entorno está configurada, *Probar conexión* y *Pedir fondos demo* (solo en Demo). El botón **Cambiar a Mainnet / Cambiar a Demo** permite pasar de un entorno al otro sin editar `.env` ni reiniciar (ver "Pasar a mainnet" en la sección 9 para las condiciones).
+- **Alertas (Telegram):** avisa por Telegram cuando algo falla de verdad: una orden que no se pudo enviar o cerrar, un error en el ciclo de una instancia, o cuando activás el kill-switch. **No detecta que el proceso del bot se caiga entero** (un crash o un `kill -9` no llegan a mandar el aviso), solo un apagado ordenado. Se configura con `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID` en `.env`; hay un botón para mandar una alerta de prueba.
 - **Límites de riesgo** (se aplican a todas las instancias; ninguna estrategia puede saltearlos):
   - *Pérdida diaria máxima por instancia (%):* si una instancia pierde más que esto en el día (de 00:00 a 24:00, hora argentina), deja de abrir operaciones hasta el día siguiente.
+  - *Pérdida diaria máxima GLOBAL (%):* suma el PnL de hoy de **todas** las instancias contra el capital de las que están activas. Si se supera, ninguna instancia abre operaciones nuevas por el resto del día. Vacío = sin este límite.
   - *Posiciones simultáneas máximas:* tope global, sumando todas las instancias.
-  - *Apalancamiento máximo (x):* tope de exposición: el valor nocional de una posición no supera el capital × este número. **No define el tamaño**: eso sale del riesgo por operación.
+  - *Apalancamiento máximo (x):* tope de exposición: el valor nocional de una posición no supera el capital × este número. **No define el tamaño**: eso sale del riesgo por operación. Se revisa y se vuelve a aplicar en cada ciclo de cada instancia (podés cambiarlo con una instancia corriendo, sin reiniciarla).
 
 ## 4. Cómo opera el bot en vivo
 
@@ -128,7 +132,7 @@ Cada instancia activa corre en segundo plano y cada ~20 segundos:
 1. **Sincroniza con Bybit:** si el exchange cerró la posición solo (por el stop-loss o take-profit), lo registra con el PnL real. Si hay una posición en el exchange sin registro y ninguna otra instancia la reclama, la adopta.
 2. **Espera una vela nueva cerrada.** Las estrategias deciden **solo con velas ya cerradas**, nunca con la que se está formando.
 3. **Le pregunta a la estrategia** si hay señal (comprar, vender o cerrar).
-4. **Pasa la señal por el gestor de riesgo:** kill-switch, pérdida diaria, posiciones simultáneas y tamaño (ver 4.3). Si algo no se cumple, la señal se descarta y **queda anotada con su motivo** en la actividad.
+4. **Pasa la señal por el gestor de riesgo:** kill-switch, pérdida diaria (por instancia y global), posiciones simultáneas, apalancamiento y tamaño, incluido el valor mínimo de la orden en USD que exige Bybit (ver 4.3). Si algo no se cumple, la señal se descarta y **queda anotada con su motivo** en la actividad.
 5. **Envía una orden de mercado** con el stop-loss y el take-profit ya puestos en Bybit. Si el bot se cae, esas protecciones siguen vigentes en el exchange.
 6. **Registra** la orden y el trade. Al cerrarse, guarda el PnL informado por Bybit.
 
@@ -151,7 +155,7 @@ Ejemplo: capital 1.000 USD, riesgo 1% (= 10 USD), precio 84.000 y stop 3% (= 2.5
 
 - El **capital de la instancia** es su capital asignado más el PnL que ya realizó.
 - El tamaño se topa por el **apalancamiento máximo** × capital.
-- Se redondea al paso del símbolo. Si queda por debajo del **mínimo del símbolo** (0,001 BTC en BTCUSDT), la señal se descarta con un aviso.
+- Se redondea al paso del símbolo. Si queda por debajo del **mínimo en cantidad** del símbolo (0,001 BTC en BTCUSDT) o del **valor mínimo de la orden en USD** que exige Bybit para ese símbolo, la señal se descarta con un aviso. El *Chequeo de tamaño* del formulario de la instancia anticipa los dos casos.
 
 ### 4.4 Por qué una instancia puede no operar (y cómo verlo)
 
@@ -161,8 +165,9 @@ Abrí la **Actividad reciente** de la instancia. Las causas típicas:
 |---|---|---|
 | *Esperando la próxima vela cerrada* | Acaba de encenderse. | Esperar. |
 | *Señal descartada: el tamaño calculado es menor al mínimo* | El capital es demasiado chico para el riesgo y stop elegidos. | Subir el capital o el % de riesgo. El *Chequeo de tamaño* del formulario lo anticipa y sugiere el capital mínimo. |
+| *Señal descartada: la orden valdría menos que el mínimo de [símbolo]* | El valor en USD de la orden queda por debajo de lo que exige Bybit para ese símbolo (independiente del mínimo en cantidad). | Subir el capital o el % de riesgo. También lo anticipa el *Chequeo de tamaño*. |
 | *Señal rechazada por riesgo: kill-switch activado* | Está el kill-switch. | Desactivarlo en Configuración. |
-| *Señal rechazada por riesgo: pérdida diaria…* | La instancia superó su límite diario. | Se libera al día siguiente (a las 00:00, hora argentina), o subir el límite. |
+| *Señal rechazada por riesgo: pérdida diaria…* | La instancia (o el conjunto de todas, si hay un límite global) superó su límite diario. | Se libera al día siguiente (a las 00:00, hora argentina), o subir el límite. |
 | *Señal rechazada por riesgo: ya hay N posiciones abiertas* | Se alcanzó el tope global. | Cerrar alguna o subir el tope. |
 | *Error en el ciclo…* | Falló una llamada a Bybit u otro problema. | Ver el mensaje. Los errores transitorios se reintentan solos. |
 | *(sin mensajes de rechazo)* | La estrategia simplemente no encontró señal. | Es lo normal la mayor parte del tiempo. |
@@ -179,7 +184,7 @@ Abrí la **Actividad reciente** de la instancia. Las causas típicas:
 
 ## 6. Descargar los datos (Excel y CSV)
 
-El botón **Descargar** aparece en Resumen, Operaciones y Backtesting (resultados, corridas guardadas, sensibilidad a costos y stress tests).
+El botón **Descargar** aparece en Resumen, Operaciones y, dentro de Backtesting, en cada resultado: la corrida principal, sensibilidad a parámetros, barrido multi-parámetro, validación fuera de muestra, walk-forward, Monte Carlo, sensibilidad a costos y stress tests, y las corridas guardadas en History.
 
 - **Excel (.xlsx):** el recomendable para abrir en Excel. Trae todas las hojas, encabezado, filtros y fechas reales.
 - **CSV:** una sola tabla, UTF-8 con acentos, separado por comas y con punto decimal. Sirve para pandas u otras herramientas. Si tu Excel está en configuración regional en español, un CSV abierto con doble clic puede mostrarse en una sola columna (allí el separador esperado es `;`): usá el `.xlsx`.
@@ -213,21 +218,31 @@ Es una copia del dashboard con datos **sintéticos** en una base aparte (`tradin
 ## 9. Seguridad
 
 - **Sin login.** El dashboard permite encender y apagar el bot, cambiar límites y ver posiciones. Cualquiera que llegue al puerto lo controla. Usalo en un servidor privado.
-- Postgres (5432) y Redis (6379) solo escuchan en `127.0.0.1`.
+- Postgres (5432) solo escucha en `127.0.0.1`.
 - El dashboard escucha en `APP_BIND` (`0.0.0.0` = toda la red). Si el servidor tiene salida a internet, poné `APP_BIND=127.0.0.1` y accedé por túnel SSH o VPN, o cerrá el puerto en el firewall.
 - Las claves de Bybit viven solo en `.env` (excluido de git). Creá la API key **sin permiso de retiro** y, si podés, restringida a la IP de tu servidor.
 - La app avisa si `DB_PASSWORD` es la de por defecto y, en MAINNET, se niega a arrancar.
 
 ### Pasar a mainnet
 
-Hoy el entorno se elige con `BYBIT_ENV` en `.env` (`demo` o `mainnet`), y todavía **no hay un selector en el dashboard**. Con `mainnet`, aparece una franja roja permanente. Antes de considerarlo: semanas de operativa en Demo con resultados coherentes con el backtest, capital chico que puedas perder por completo, la API key de mainnet sin permiso de retiro, y el kill-switch probado.
+El entorno activo (Demo o MAINNET) se elige y se cambia **desde el dashboard** (Configuración → Conexión con Bybit → *Cambiar a Mainnet*/*Cambiar a Demo*), sin editar `.env` ni reiniciar la app. `BYBIT_ENV` en `.env` solo define con qué entorno arranca el proceso la primera vez; una vez elegido desde el dashboard, esa elección queda guardada y se mantiene aunque reinicies.
+
+Para poder pasar a mainnet hacen falta, además, `BYBIT_MAINNET_API_KEY` y `BYBIT_MAINNET_API_SECRET` completos en `.env` (son credenciales distintas de las de Demo). El cambio pide confirmación explícita y se **bloquea** si:
+
+- Falta alguna de las credenciales de mainnet.
+- `DB_PASSWORD` sigue siendo la de por defecto.
+- Hay alguna instancia corriendo (apagalas primero).
+- Hay alguna posición abierta registrada (cerralas, por ejemplo con "Cerrar todo").
+
+Con MAINNET activo aparece una franja roja permanente en toda la interfaz. Antes de considerarlo: semanas de operativa en Demo con resultados coherentes con el backtest, capital chico que puedas perder por completo, la API key de mainnet sin permiso de retiro, y el kill-switch probado.
 
 ## 10. Solución de problemas
 
 | Síntoma | Causa probable y solución |
 |---|---|
 | `invalid request, please check your server timestamp` en los logs | El reloj de la máquina o de Docker está desfasado respecto de Bybit. El sistema lo compensa solo; si persiste, sincronizá el reloj (en Windows con WSL: `wsl --shutdown` y reabrir Docker). |
-| *Conexión: error 401 / clave inválida* | La clave de Demo Trading y la de mainnet son distintas. Verificá `BYBIT_ENV` y que la clave corresponda. Después de editar `.env`, usá `docker compose up -d` (un simple `restart` no relee el archivo). |
+| *Conexión: error 401 / clave inválida* | La clave de Demo Trading y la de mainnet son distintas. Verificá en Configuración qué entorno está activo y que la clave correspondiente esté completa en `.env`. Después de editar `.env`, usá `docker compose up -d` (un simple `restart` no relee el archivo). |
+| *No se puede cambiar de entorno* (mensaje al tocar "Cambiar a Mainnet"/"Cambiar a Demo") | Faltan las credenciales de mainnet en `.env`, `DB_PASSWORD` sigue siendo la de por defecto, hay una instancia corriendo, o hay una posición abierta registrada. El mensaje dice cuál. | Completar las credenciales, cambiar la contraseña, apagar las instancias o cerrar las posiciones (sección 9). |
 | Una instancia enciende pero no opera | Mirá su **Actividad reciente** (sección 4.4). |
 | *«X» ya está operando BTCUSDT* | Una sola instancia activa por símbolo (sección 4.2). |
 | El *equity total* es mucho mayor que el *balance de margen* | Demo incluye 1 BTC y 1 ETH que no cuentan como margen. Es normal. |

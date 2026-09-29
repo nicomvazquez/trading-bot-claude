@@ -78,11 +78,12 @@ _COLS = [
 
 
 def _metrics_table(rows: list[dict], row_key: str = "label") -> None:
-    table = ui.table(
-        columns=[{"name": k, "label": label, "field": k, "align": align} for k, label, align in _COLS],
-        rows=rows, row_key=row_key,
-    ).props("flat dense hide-pagination").classes("w-full")
-    table.add_slot("body-cell-ret", RET_SLOT)
+    with ui.element("div").classes("w-full overflow-x-auto"):
+        table = ui.table(
+            columns=[{"name": k, "label": label, "field": k, "align": align} for k, label, align in _COLS],
+            rows=rows, row_key=row_key,
+        ).props("flat dense hide-pagination").classes("w-full")
+        table.add_slot("body-cell-ret", RET_SLOT)
 
 
 def build_stress_tab(panel: ConfigPanel) -> None:
@@ -333,26 +334,27 @@ def _render_stress(results: list[StressResult], has_funding: bool, data_warnings
 
     with w.bordered_card():
         w.section_title("Resultado por escenario", "Pasá el mouse por el nombre para ver qué cambia en cada uno.")
-        table = ui.table(
-            columns=[
-                {"name": "label", "label": "Escenario", "field": "label", "align": "left"},
-                {"name": "ret", "label": "Retorno", "field": "ret", "align": "right"},
-                {"name": "delta", "label": "Δ vs base (pp)", "field": "delta", "align": "right"},
-                {"name": "dd", "label": "Drawdown máx.", "field": "dd", "align": "right"},
-                {"name": "sharpe", "label": "Sharpe", "field": "sharpe", "align": "right"},
-                {"name": "pf", "label": "Profit factor", "field": "pf", "align": "right"},
-                {"name": "final", "label": "Capital final", "field": "final", "align": "right"},
-                {"name": "trades", "label": "Operaciones", "field": "trades", "align": "right"},
-                {"name": "state", "label": "Estado", "field": "state", "align": "left"},
-            ],
-            rows=rows, row_key="label",
-        ).props("flat dense hide-pagination").classes("w-full")
-        table.add_slot("body-cell-ret", RET_SLOT)
-        table.add_slot("body-cell-delta", r"""
-            <q-td :props="props" class="text-gray-600"><span class="num">{{ props.value == null ? '—' : (props.value > 0 ? '+' : '') + props.value.toFixed(2) }}</span></q-td>""")
-        table.add_slot("body-cell-label", r"""
-            <q-td :props="props"><span class="font-medium">{{ props.value }}</span><q-tooltip max-width="320px">{{ props.row.desc }}</q-tooltip></q-td>""")
-        table.add_slot("body-cell-state", STATE_SLOT)
+        with ui.element("div").classes("w-full overflow-x-auto"):
+            table = ui.table(
+                columns=[
+                    {"name": "label", "label": "Escenario", "field": "label", "align": "left"},
+                    {"name": "ret", "label": "Retorno", "field": "ret", "align": "right"},
+                    {"name": "delta", "label": "Δ vs base (pp)", "field": "delta", "align": "right"},
+                    {"name": "dd", "label": "Drawdown máx.", "field": "dd", "align": "right"},
+                    {"name": "sharpe", "label": "Sharpe", "field": "sharpe", "align": "right"},
+                    {"name": "pf", "label": "Profit factor", "field": "pf", "align": "right"},
+                    {"name": "final", "label": "Capital final", "field": "final", "align": "right"},
+                    {"name": "trades", "label": "Operaciones", "field": "trades", "align": "right"},
+                    {"name": "state", "label": "Estado", "field": "state", "align": "left"},
+                ],
+                rows=rows, row_key="label",
+            ).props("flat dense hide-pagination").classes("w-full")
+            table.add_slot("body-cell-ret", RET_SLOT)
+            table.add_slot("body-cell-delta", r"""
+                <q-td :props="props" class="text-gray-600"><span class="num">{{ props.value == null ? '—' : (props.value > 0 ? '+' : '') + props.value.toFixed(2) }}</span></q-td>""")
+            table.add_slot("body-cell-label", r"""
+                <q-td :props="props"><span class="font-medium">{{ props.value }}</span><q-tooltip max-width="320px">{{ props.row.desc }}</q-tooltip></q-td>""")
+            table.add_slot("body-cell-state", STATE_SLOT)
 
     with w.bordered_card():
         w.section_title("Retorno por escenario", "En el orden de la tabla, sin ranking. Línea punteada: el escenario base.")

@@ -165,14 +165,15 @@ def _render_oos(in_seg: Segment, out_seg: Segment, cut, data_warnings: list[str]
                 lambda: [oos_table(in_seg, out_seg, METRIC_LABELS, _COMPARED_METRICS)],
                 "fuera_de_muestra", ["Fuera de muestra"],
             )
-        ui.table(
-            columns=[
-                {"name": "metric", "label": "", "field": "metric", "align": "left"},
-                {"name": "in", "label": "In-sample", "field": "in", "align": "right"},
-                {"name": "out", "label": "Out-of-sample", "field": "out", "align": "right"},
-            ],
-            rows=rows, row_key="metric",
-        ).props("flat dense hide-pagination").classes("w-full")
+        with ui.element("div").classes("w-full overflow-x-auto"):
+            ui.table(
+                columns=[
+                    {"name": "metric", "label": "", "field": "metric", "align": "left"},
+                    {"name": "in", "label": "In-sample", "field": "in", "align": "right"},
+                    {"name": "out", "label": "Out-of-sample", "field": "out", "align": "right"},
+                ],
+                rows=rows, row_key="metric",
+            ).props("flat dense hide-pagination").classes("w-full")
 
     with w.bordered_card():
         w.section_title(

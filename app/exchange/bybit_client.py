@@ -325,6 +325,7 @@ class BybitClient:
                         "qty": float(pos["size"]),
                         "entry_price": float(pos["avgPrice"]),
                         "unrealised_pnl": float(pos["unrealisedPnl"]),
+                        "mark_price": float(pos["markPrice"]),
                     }
             return None
 
