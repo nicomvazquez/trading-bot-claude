@@ -35,28 +35,37 @@ class SizingPreview:
 
 def evaluate_sizing(
     capital: float, price: float, risk_pct: float, stop_loss_pct: float,
-    max_leverage: float, min_qty: float, qty_step: float,
+    max_leverage: float, min_qty: float, qty_step: float, min_notional: float = 0.0,
 ) -> SizingPreview:
     """Simula el tamano de una entrada con el mismo calculo que usa la operativa en
-    vivo (risk_based topeado por apalancamiento) y lo compara con el minimo del simbolo."""
+    vivo (risk_based topeado por apalancamiento) y lo compara con el minimo del simbolo (en cantidad
+    y, si Bybit lo informa, tambien en valor: `min_notional` en USD)."""
     stop = price * (1 - stop_loss_pct / 100)
     raw = position_size(capital, price, stop, risk_pct, max_leverage)
     qty = math.floor(raw / qty_step + 1e-9) * qty_step if qty_step > 0 else raw
     notional = qty * price
     risk_amount = capital * risk_pct / 100
-    # capital necesario: por riesgo (qty = capital*risk / (price*stop%)) y por tope de apalancamiento
+    # capital necesario: por riesgo (qty = capital*risk / (price*stop%)), por tope de apalancamiento y por el
+    # valor minimo en USD de la orden (si el simbolo lo tiene)
     by_risk = min_qty * price * stop_loss_pct / risk_pct if risk_pct > 0 else float("inf")
     by_leverage = min_qty * price / max_leverage if max_leverage > 0 else float("inf")
-    min_capital = max(by_risk, by_leverage)
-    ok = qty >= min_qty
+    by_notional = min_notional * stop_loss_pct / risk_pct if min_notional and risk_pct > 0 else 0.0
+    min_capital = max(by_risk, by_leverage, by_notional)
+    ok = qty >= min_qty and (not min_notional or notional >= min_notional)
     if ok:
         message = (
             f"Cada entrada sería de ~{qty:g} (≈ ${notional:,.0f}), arriesgando ${risk_amount:,.2f} hasta el stop."
         )
-    else:
+    elif qty < min_qty:
         message = (
             f"Con este capital la posición sería de ~${raw * price:,.0f}, por debajo del mínimo del símbolo "
             f"({min_qty:g} ≈ ${min_qty * price:,.0f}): la instancia no podría operar. "
+            f"Necesitás al menos ~${math.ceil(min_capital):,} de capital con este riesgo y stop, o subir el % de riesgo."
+        )
+    else:
+        message = (
+            f"Con este capital la posición valdría ~${notional:,.0f}, por debajo del valor mínimo de una orden en "
+            f"este símbolo (${min_notional:,.0f}): la instancia no podría operar. "
             f"Necesitás al menos ~${math.ceil(min_capital):,} de capital con este riesgo y stop, o subir el % de riesgo."
         )
     return SizingPreview(ok, qty, notional, risk_amount, min_qty, min_capital, message)
@@ -79,7 +88,10 @@ async def sizing_preview(symbol: str, capital: float, params: dict) -> SizingPre
     async with async_session() as session:
         settings_row = await session.get(BotSettings, 1)
     leverage = settings_row.max_leverage if settings_row else 10.0
-    return evaluate_sizing(capital, price, risk_pct, stop_pct, leverage, info["min_qty"], info["qty_step"])
+    return evaluate_sizing(
+        capital, price, risk_pct, stop_pct, leverage, info["min_qty"], info["qty_step"],
+        min_notional=info.get("min_notional") or 0.0,
+    )
 
 
 # ------------------------------------------------------------------ CRUD

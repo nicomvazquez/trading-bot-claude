@@ -3,7 +3,7 @@ import logging
 
 from nicegui import ui
 
-from app.config import settings
+from app.exchange.bybit_client import bybit_client
 from app.live import instances as svc
 from app.live.events import load_events
 from app.live.orchestrator import orchestrator
@@ -168,7 +168,7 @@ async def estrategias_page() -> None:
         return bool(result)
 
     async def toggle(instance, active: bool) -> None:
-        if active and not settings.bybit_demo:
+        if active and not bybit_client.is_demo:
             if not await confirm("Operar en MAINNET", f"«{instance.name}» va a operar con dinero real. ¿Confirmás?", "Encender"):
                 await refresh()
                 return

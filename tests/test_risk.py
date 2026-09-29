@@ -67,3 +67,40 @@ def test_non_positive_equity_or_price_gives_zero_size() -> None:
     assert position_size(0.0, 100.0, 95.0, 1.0) == 0.0
     assert position_size(-50.0, 100.0, 95.0, 1.0) == 0.0
     assert position_size(1000.0, 0.0, 95.0, 1.0) == 0.0
+
+
+def test_global_daily_loss_limit_blocks_entry_even_if_this_instance_is_fine() -> None:
+    rm = RiskManager(RiskLimits(max_daily_loss_pct=50.0, max_daily_loss_global_pct=5.0))
+    result = rm.evaluate_entry(
+        Signal(action="buy", stop_loss=95.0), equity=1000.0, price=100.0, daily_pnl_pct=-1.0,
+        open_positions_count=0, global_daily_pnl_pct=-6.0,
+    )
+    assert not result.approved and "GLOBAL" in result.reason
+
+
+def test_global_daily_loss_within_limit_is_allowed() -> None:
+    rm = RiskManager(RiskLimits(max_daily_loss_global_pct=5.0))
+    result = rm.evaluate_entry(
+        Signal(action="buy", stop_loss=95.0), equity=1000.0, price=100.0, daily_pnl_pct=0.0,
+        open_positions_count=0, global_daily_pnl_pct=-2.0,
+    )
+    assert result.approved
+
+
+def test_global_daily_loss_limit_is_opt_in() -> None:
+    """Sin configurar el limite global (None, el default), una perdida global grande no bloquea nada."""
+    rm = RiskManager(RiskLimits())
+    result = rm.evaluate_entry(
+        Signal(action="buy", stop_loss=95.0), equity=1000.0, price=100.0, daily_pnl_pct=0.0,
+        open_positions_count=0, global_daily_pnl_pct=-90.0,
+    )
+    assert result.approved
+
+
+def test_global_daily_loss_limit_needs_the_global_pnl_to_be_provided() -> None:
+    """Si el limite esta configurado pero nadie paso el pnl global (parametro faltante), no puede evaluarlo: no bloquea."""
+    rm = RiskManager(RiskLimits(max_daily_loss_global_pct=5.0))
+    result = rm.evaluate_entry(
+        Signal(action="buy", stop_loss=95.0), equity=1000.0, price=100.0, daily_pnl_pct=0.0, open_positions_count=0,
+    )
+    assert result.approved

@@ -17,6 +17,7 @@ class RiskLimits:
     max_daily_loss_pct: float = 5.0
     max_concurrent_positions: int = 5
     max_leverage: float = 10.0
+    max_daily_loss_global_pct: float | None = None  # None = sin limite global (ademas del limite por instancia)
 
 
 class RiskManager:
@@ -34,6 +35,7 @@ class RiskManager:
         price: float,
         daily_pnl_pct: float,
         open_positions_count: int,
+        global_daily_pnl_pct: float | None = None,
     ) -> RiskCheck:
         if self.limits.kill_switch:
             return RiskCheck(approved=False, reason="kill-switch activado")
@@ -43,6 +45,17 @@ class RiskManager:
                 approved=False,
                 reason=f"perdida diaria {daily_pnl_pct:.2f}% supera el limite de "
                 f"{self.limits.max_daily_loss_pct:.2f}%",
+            )
+
+        if (
+            self.limits.max_daily_loss_global_pct is not None
+            and global_daily_pnl_pct is not None
+            and global_daily_pnl_pct <= -abs(self.limits.max_daily_loss_global_pct)
+        ):
+            return RiskCheck(
+                approved=False,
+                reason=f"perdida diaria GLOBAL {global_daily_pnl_pct:.2f}% (todas las instancias) supera el "
+                f"limite de {self.limits.max_daily_loss_global_pct:.2f}%",
             )
 
         if open_positions_count >= self.limits.max_concurrent_positions:

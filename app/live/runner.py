@@ -8,6 +8,7 @@ from app.backtest.extras import enrich_candles
 from app.db.base import async_session
 from app.db.models import BotSettings, Order, StrategyInstance, Trade
 from app.exchange.bybit_client import bybit_client
+from app.live.closing import close_trade, record_trade_close
 from app.live.events import log_event
 from app.timeutil import day_start_utc, fmt as fmt_time, label as tz_label
 from app.live.rules import decide_candle, should_adopt_position, summarize_closed_pnl
@@ -35,6 +36,7 @@ async def _load_limits() -> RiskLimits:
             max_daily_loss_pct=row.max_daily_loss_pct,
             max_concurrent_positions=row.max_concurrent_positions,
             max_leverage=row.max_leverage,
+            max_daily_loss_global_pct=row.max_daily_loss_global_pct,
         )
 
 
@@ -42,6 +44,22 @@ async def _global_open_positions_count() -> int:
     async with async_session() as session:
         result = await session.execute(select(func.count()).select_from(Trade).where(Trade.closed_at.is_(None)))
         return result.scalar_one()
+
+
+async def _global_daily_pnl_pct() -> float | None:
+    """PnL de hoy sumando TODAS las instancias, sobre el capital de las que estan activas ahora mismo.
+    None si no hay ninguna instancia activa (no hay sobre que sacar el porcentaje)."""
+    today_start = day_start_utc()
+    async with async_session() as session:
+        capital = (
+            await session.execute(select(func.coalesce(func.sum(StrategyInstance.initial_capital), 0.0)).where(StrategyInstance.is_active.is_(True)))
+        ).scalar_one()
+        if not capital:
+            return None
+        pnl_today = (
+            await session.execute(select(func.coalesce(func.sum(Trade.pnl), 0.0)).where(Trade.closed_at.is_not(None), Trade.closed_at >= today_start))
+        ).scalar_one()
+    return pnl_today / capital * 100
 
 
 class StrategyRunner:
@@ -77,18 +95,22 @@ class StrategyRunner:
         strategy_cls = registry.get(instance.strategy_key)
         strategy = strategy_cls(strategy_cls.params_model(**instance.params))
 
-        try:
-            limits = await _load_limits()
-            await bybit_client.set_leverage(instance.symbol, limits.max_leverage)
-        except Exception:
-            logger.exception("No se pudo fijar el apalancamiento de %s", instance.symbol)
-
+        last_applied_leverage: float | None = None
         last_seen_candle: dt.datetime | None = None
         logger.info("Instancia %s (%s %s %s) arrancada", instance.id, instance.strategy_key, instance.symbol, instance.timeframe)
         await log_event(self.instance_id, "started", f"Instancia encendida ({instance.symbol} {instance.timeframe}m)")
 
         while not self._stop_requested:
             try:
+                # se relee en cada ciclo: un cambio en Configuración se aplica sin reiniciar la instancia
+                limits = await _load_limits()
+                if limits.max_leverage != last_applied_leverage:
+                    try:
+                        await bybit_client.set_leverage(instance.symbol, limits.max_leverage)
+                        last_applied_leverage = limits.max_leverage
+                    except Exception:
+                        logger.exception("No se pudo fijar el apalancamiento de %s", instance.symbol)
+
                 await self._reconcile_exchange_position(instance)
 
                 candles = await bybit_client.get_candles_df(instance.symbol, instance.timeframe, limit=1000)
@@ -154,18 +176,10 @@ class StrategyRunner:
 
         if open_trade is not None and exchange_position is None:
             closed_pnl = await self._closed_pnl_since(instance.symbol, open_trade.opened_at)
-            exit_price = closed_pnl.avg_exit_price if closed_pnl else open_trade.entry_price
-            pnl = closed_pnl.closed_pnl if closed_pnl else 0.0
-            exit_time = closed_pnl.updated_time if closed_pnl else dt.datetime.now(dt.timezone.utc)
-            async with async_session() as session:
-                trade = await session.get(Trade, open_trade.id)
-                trade.exit_price = exit_price
-                trade.pnl = pnl
-                trade.closed_at = exit_time
-                trade.exit_reason = "stop_loss_o_take_profit (exchange)"
-                await session.commit()
-            logger.info("Instancia %s: posicion cerrada por el exchange, pnl=%.4f", self.instance_id, pnl)
-            await log_event(self.instance_id, "closed", f"Cerrada por stop-loss/take-profit del exchange, PnL {pnl:+.4f} USD")
+            updated = await record_trade_close(open_trade, "stop_loss_o_take_profit (exchange)", closed_pnl)
+            logger.info("Instancia %s: posicion cerrada por el exchange, pnl=%s", self.instance_id, updated.pnl)
+            pnl_text = f"{updated.pnl:+.4f} USD" if updated.pnl is not None else "no disponible"
+            await log_event(self.instance_id, "closed", f"Cerrada por stop-loss/take-profit del exchange, PnL {pnl_text}")
 
         elif open_trade is None and exchange_position is not None and not should_adopt_position(
             False, True, await self._symbol_open_elsewhere(instance.symbol)
@@ -189,6 +203,11 @@ class StrategyRunner:
                     )
                 )
                 await session.commit()
+            await log_event(
+                self.instance_id, "opened",
+                f"Adoptada una posición {exchange_position['side']} {exchange_position['qty']:g} {instance.symbol} que ya "
+                "estaba abierta en Bybit y no tenía ninguna instancia local a cargo.",
+            )
 
     async def _on_new_candle(self, instance: StrategyInstance, strategy, candles) -> None:
         open_trade = await self._get_open_trade()
@@ -218,14 +237,14 @@ class StrategyRunner:
 
         if signal.action == "close":
             if open_trade is not None:
-                await self._close_position(instance, open_trade, reason="senal")
+                await self._close_position(open_trade, reason="senal")
             return
 
         desired_side = "long" if signal.action == "buy" else "short"
         if open_trade is not None:
             if open_trade.side == desired_side:
                 return  # ya estamos en esa direccion, no duplicar entrada
-            if not await self._close_position(instance, open_trade, reason="flip"):
+            if not await self._close_position(open_trade, reason="flip"):
                 # no se pudo cerrar la posicion contraria: NUNCA abrir la nueva sin haber cerrado la anterior
                 # (si se ignora el fallo y se sigue igual, se termina con dos posiciones opuestas y un trade
                 # huerfano en la base, que ademas se "adopta" como ajeno en la proxima reconciliacion)
@@ -233,22 +252,31 @@ class StrategyRunner:
 
         limits = await _load_limits()
         daily_pnl_pct = await self._daily_pnl_pct(instance)
+        global_daily_pnl_pct = await _global_daily_pnl_pct()
         open_positions_count = await _global_open_positions_count()
 
-        check = RiskManager(limits).evaluate_entry(signal, equity, price, daily_pnl_pct, open_positions_count)
+        check = RiskManager(limits).evaluate_entry(signal, equity, price, daily_pnl_pct, open_positions_count, global_daily_pnl_pct)
         if not check.approved:
             logger.info("Instancia %s: senal rechazada por riesgo (%s)", self.instance_id, check.reason)
             await log_event(self.instance_id, "rejected", f"Señal de {desired_side} rechazada por riesgo: {check.reason}")
             return
 
         qty = await bybit_client.round_qty(instance.symbol, check.qty)
+        info = await bybit_client.get_instrument_info(instance.symbol)
         if qty <= 0:
             logger.info("Instancia %s: tamano calculado por debajo del minimo del simbolo", self.instance_id)
-            info = await bybit_client.get_instrument_info(instance.symbol)
             await log_event(
                 self.instance_id, "rejected",
                 f"Señal de {desired_side} descartada: el tamaño calculado ({check.qty:.6f}) es menor al mínimo de "
                 f"{instance.symbol} ({info['min_qty']}). Subí el capital o el % de riesgo de la instancia.",
+            )
+            return
+        if info["min_notional"] and qty * price < info["min_notional"]:
+            logger.info("Instancia %s: valor de la orden por debajo del minimo del simbolo", self.instance_id)
+            await log_event(
+                self.instance_id, "rejected",
+                f"Señal de {desired_side} descartada: la orden valdría ${qty * price:,.2f}, por debajo del mínimo de "
+                f"{instance.symbol} (${info['min_notional']:,.2f}). Subí el capital o el % de riesgo de la instancia.",
             )
             return
 
@@ -295,35 +323,12 @@ class StrategyRunner:
             + (f" · {signal.reason}" if signal.reason else ""),
         )
 
-    async def _close_position(self, instance: StrategyInstance, open_trade: Trade, reason: str) -> bool:
+    async def _close_position(self, open_trade: Trade, reason: str) -> bool:
         """Devuelve True si la orden de cierre se envio con exito. El llamador NUNCA debe abrir una posicion
         nueva (flip) sin comprobar este resultado: seguir de largo dejaria dos posiciones opuestas abiertas
-        en el exchange y el trade viejo huerfano en la base."""
-        side = "Sell" if open_trade.side == "long" else "Buy"
-        try:
-            await bybit_client.place_market_order(instance.symbol, side, open_trade.qty, reduce_only=True)
-        except Exception as exc:
-            logger.exception("Instancia %s: fallo al cerrar la posicion", self.instance_id)
-            await log_event(self.instance_id, "error", f"No se pudo cerrar la posición ({reason}): {exc}")
-            return False
-
-        closed_pnl = None
-        for _ in range(4):  # Bybit tarda un instante en publicar el cierre
-            await asyncio.sleep(1.0)
-            closed_pnl = await self._closed_pnl_since(instance.symbol, open_trade.opened_at)
-            if closed_pnl is not None:
-                break
-        async with async_session() as session:
-            trade = await session.get(Trade, open_trade.id)
-            trade.exit_price = closed_pnl.avg_exit_price if closed_pnl else trade.entry_price
-            trade.pnl = closed_pnl.closed_pnl if closed_pnl else 0.0
-            trade.closed_at = dt.datetime.now(dt.timezone.utc)
-            trade.exit_reason = reason
-            await session.commit()
-        logger.info("Instancia %s: posicion cerrada (%s)", self.instance_id, reason)
-        pnl_text = f", PnL {closed_pnl.closed_pnl:+.4f} USD" if closed_pnl else ", PnL no disponible aún"
-        await log_event(self.instance_id, "closed", f"Cerrada por {reason}{pnl_text}")
-        return True
+        en el exchange y el trade viejo huerfano en la base. La mecanica del cierre (orden, PnL real,
+        comisiones y funding) vive en app.live.closing: la comparte el boton de emergencia "cerrar todo"."""
+        return await close_trade(open_trade, reason)
 
     async def _current_equity(self, instance: StrategyInstance) -> float:
         async with async_session() as session:

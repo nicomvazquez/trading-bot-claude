@@ -3,7 +3,6 @@ import logging
 import plotly.graph_objects as go
 from nicegui import ui
 
-from app.config import settings
 from app.exchange.bybit_client import bybit_client
 from app.live.events import load_events
 from app.live.orchestrator import orchestrator
@@ -73,7 +72,7 @@ def _table(columns: list[tuple[str, str]], rows: list[dict], left: tuple[str, ..
 @ui.page("/")
 def overview_page() -> None:
     render_nav("/")
-    demo = settings.bybit_demo
+    demo = bybit_client.is_demo
     async def export_tables():
         instances, trades, orders = await load_instances(), await load_trades(), await load_orders(1000)
         names = {i.id: i.name for i in instances}

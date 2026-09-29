@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from nicegui import ui
 
 from app.config import settings
+from app.exchange.bybit_client import bybit_client
 from app.live.queries import load_bot_status
 from app.timeutil import fmt, label as tz_label
 
@@ -96,7 +97,7 @@ def pill(text: str, kind: str = "idle", icon_dot: bool = True) -> ui.html:
 
 
 def render_nav(active_path: str) -> None:
-    demo = settings.bybit_demo
+    demo = bybit_client.is_demo
     ui.colors(primary=PRIMARY, secondary="#5b6b8c", accent="#7a5af8", positive=POSITIVE, negative=NEGATIVE, warning=WARNING, info="#2a78d6")
 
     with ui.left_drawer(top_corner=True, bottom_corner=True).props("show-if-above width=236 breakpoint=1024 bordered").classes("p-0") as drawer:

@@ -115,12 +115,13 @@ def live_trades_table(trades, names: dict[int, str]) -> Table:
         duration = (t.closed_at - t.opened_at).total_seconds() / 3600 if t.closed_at else None
         rows.append([
             t.id, names.get(t.strategy_instance_id, ""), t.symbol, t.side, t.qty, t.entry_price, t.exit_price,
-            t.stop_loss, t.take_profit, t.pnl, t.exit_reason, t.opened_at, t.closed_at, duration,
+            t.stop_loss, t.take_profit, t.pnl, t.fees, t.funding, t.exit_reason, t.opened_at, t.closed_at, duration,
             "Cerrado" if t.closed_at else "Abierto",
         ])
     return Table("Trades", [
         "ID", "Instancia", "Símbolo", "Lado", "Cantidad", "Precio entrada", "Precio salida", "Stop loss", "Take profit",
-        "PnL (USD)", "Motivo de salida", "Apertura (hora argentina)", "Cierre (hora argentina)", "Duración (horas)", "Estado",
+        "PnL (USD)", "Comisiones (USD)", "Funding (USD)", "Motivo de salida", "Apertura (hora argentina)",
+        "Cierre (hora argentina)", "Duración (horas)", "Estado",
     ], rows)
 
 
@@ -220,6 +221,71 @@ def stress_table(results) -> Table:
         delta = None if not base or not m else m.get("total_return_pct", 0) - base.get("total_return_pct", 0)
         rows.append([r.label, r.description, *[m.get(k) for k in _STRESS_KEYS], delta, r.error])
     return Table("Stress tests", ["Escenario", "Descripción", *_STRESS_HEADERS, "Δ retorno vs base (pp)", "Error"], rows)
+
+
+_WF_AGGREGATE_LABELS = {
+    "n_windows": "Ventanas totales", "n_evaluated": "Ventanas evaluadas", "n_skipped": "Ventanas omitidas",
+    "pct_profitable": "Ventanas ganadoras (%)", "return_mean": "Retorno de test (media, %)",
+    "return_median": "Retorno de test (mediana, %)", "return_min": "Retorno de test (mín., %)",
+    "return_max": "Retorno de test (máx., %)", "return_std": "Retorno de test (desvío, %)",
+    "sharpe_median": "Sharpe de test (mediana)", "worst_drawdown": "Peor drawdown de test (%)",
+    "trades_total": "Operaciones (suma)", "pct_few_trades": "Ventanas con menos de 10 operaciones (%)",
+    "compounded_return_pct": "Retorno compuesto OOS (%)", "distinct_param_sets": "Conjuntos de parámetros distintos",
+    "most_common_share": "Uso del conjunto más frecuente (%)",
+}
+
+
+def grid_points_table(name: str, points: list[dict], param_names: list[str], metric_labels: dict) -> Table:
+    """Sirve tanto para la sensibilidad de parametros como para el barrido multi-parametro (Robustness):
+    las dos devuelven una lista de {"params": {...}, <metricas de compute_metrics>}."""
+    metric_keys = [k for k in metric_labels if k != "initial_equity" and any(k in p for p in points)]
+    headers = [*param_names, *[metric_labels[k] for k in metric_keys]]
+    rows = [[p["params"].get(n) for n in param_names] + [p.get(k) for k in metric_keys] for p in points]
+    return Table(name, headers, rows)
+
+
+def oos_table(in_seg, out_seg, metric_labels: dict, compared_metrics: list[str]) -> Table:
+    rows = [[metric_labels.get(k, k), (in_seg.metrics or {}).get(k), (out_seg.metrics or {}).get(k)] for k in compared_metrics]
+    return Table("Fuera de muestra", ["Métrica", "In-sample", "Out-of-sample"], rows)
+
+
+def walk_forward_tables(result) -> list[Table]:
+    summary = Table("Resumen", ["Métrica", "Valor"], [[_WF_AGGREGATE_LABELS.get(k, k), v] for k, v in result.aggregate.items()])
+    keys = sorted({k for wr in result.windows for k in wr.params}) if result.optimized else []
+    rows = []
+    for wr in result.windows:
+        tm, rm = wr.test_metrics or {}, wr.train_metrics or {}
+        rows.append([
+            wr.window.index + 1, wr.window.train_start, wr.window.train_end, wr.window.test_start, wr.window.test_end,
+            *[wr.params.get(k) for k in keys],
+            rm.get("total_return_pct"), rm.get("sharpe_ratio"), rm.get("num_trades"),
+            tm.get("total_return_pct"), tm.get("sharpe_ratio"), tm.get("sortino_ratio"), tm.get("max_drawdown_pct"),
+            tm.get("profit_factor"), tm.get("win_rate_pct"), tm.get("num_trades"), wr.skipped_reason,
+        ])
+    headers = [
+        "Ventana", "Train inicio", "Train fin", "Test inicio", "Test fin", *keys,
+        "Retorno train (%)", "Sharpe train", "Operaciones train",
+        "Retorno test (%)", "Sharpe test", "Sortino test", "Drawdown test (%)", "Profit factor test",
+        "Win rate test (%)", "Operaciones test", "Nota",
+    ]
+    return [summary, Table("Ventanas", headers, rows)]
+
+
+def monte_carlo_tables(mc) -> list[Table]:
+    summary = Table("Resumen", ["Métrica", "Valor"], [
+        ["Método", mc.method], ["Simulaciones", mc.n_sims], ["Operaciones usadas", mc.n_trades],
+        ["Semilla", mc.seed], ["Tamaño de bloque", mc.block_size],
+        ["Retorno real (%)", mc.actual_return_pct], ["Drawdown real (%)", mc.actual_max_dd_pct],
+        ["Retorno p5 (%)", mc.return_pct_p5], ["Retorno p25 (%)", mc.return_pct_p25], ["Retorno p50 (%)", mc.return_pct_p50],
+        ["Retorno p75 (%)", mc.return_pct_p75], ["Retorno p95 (%)", mc.return_pct_p95], ["Retorno medio (%)", mc.return_pct_mean],
+        ["Drawdown p5 (%)", mc.max_dd_p5], ["Drawdown p50 (%)", mc.max_dd_p50], ["Drawdown p95 (%)", mc.max_dd_p95],
+        ["Probabilidad de pérdida (%)", mc.prob_loss_pct],
+        [f"Probabilidad de drawdown > {mc.ruin_threshold_pct:.0f}%", mc.prob_ruin_pct],
+        ["% de simulaciones con drawdown peor que el real", mc.actual_dd_worse_than_pct],
+    ])
+    dist = Table("Distribución", ["#", "Retorno final (%)", "Drawdown máximo (%)"],
+                 [[i + 1, r, d] for i, (r, d) in enumerate(zip(mc.returns_distribution, mc.drawdowns_distribution, strict=True))])
+    return [summary, dist]
 
 
 def cost_tables(cost) -> list[Table]:

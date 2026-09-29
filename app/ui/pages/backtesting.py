@@ -15,7 +15,7 @@ from app.ui import backtest_widgets as w
 from app.ui.backtest_config_panel import ConfigPanel
 from app.ui.backtest_robustness import build_robustness_tab
 from app.ui.backtest_validation import build_validation_tab
-from app.exports import backtest_tables
+from app.exports import backtest_tables, monte_carlo_tables
 from app.strategies import registry
 from app.ui.backtest_format import EXIT_REASON_LABELS, METRIC_GROUPS, METRIC_LABELS
 from app.ui.backtest_history import build_history_tab
@@ -140,6 +140,8 @@ async def backtesting_page() -> None:
                     if mc is None:
                         w.notice("Hacen falta al menos 10 operaciones cerradas para correr Monte Carlo.", "warning")
                         return
+                    with ui.row().classes("w-full justify-end"):
+                        export_button(lambda m=mc: monte_carlo_tables(m), "monte_carlo", ["Resumen", "Distribución"])
                     w.render_mc_results(mc)
 
             run_mc_button.on_click(run_mc)

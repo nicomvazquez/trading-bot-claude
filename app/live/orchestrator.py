@@ -63,5 +63,8 @@ class Orchestrator:
     def is_running(self, instance_id: int) -> bool:
         return instance_id in self._runners
 
+    def running_count(self) -> int:
+        return len(self._runners)
+
 
 orchestrator = Orchestrator()

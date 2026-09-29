@@ -61,21 +61,43 @@ class BybitClient:
     event loop de asyncio."""
 
     def __init__(self) -> None:
+        # Arranca en el entorno del .env; app.live.environment.sync_from_db lo resincroniza contra
+        # BotSettings.bybit_env apenas la base esta lista (aca todavia no se puede leer: el __init__
+        # es sincronico y corre al importar el modulo, antes de que exista un event loop).
+        self._demo = settings.bybit_demo
         # Demo Trading (no testnet): corre sobre el dominio de mainnet con
         # fondos virtuales, asi que ve el mismo precio y la misma liquidez
         # reales que produccion — a diferencia del testnet clasico de Bybit,
         # que es un mercado aparte con muy poca profundidad.
-        self._http = HTTP(
-            demo=settings.bybit_demo,
-            api_key=settings.bybit_api_key or None,
-            api_secret=settings.bybit_api_secret or None,
-        )
+        self._http = self._build_http(self._demo)
         # Los datos de velas historicas se piden siempre a mainnet real (sin
         # demo=True): es informacion publica, no requiere credenciales, y
         # es la misma serie de precios que ya usa el propio Demo Trading.
         self._public_http = HTTP(testnet=False)
         self._instrument_cache: dict[str, dict] = {}
         _install_clock_sync(self._public_http)
+
+    @staticmethod
+    def _build_http(demo: bool) -> HTTP:
+        return HTTP(
+            demo=demo,
+            api_key=(settings.bybit_api_key if demo else settings.bybit_mainnet_api_key) or None,
+            api_secret=(settings.bybit_api_secret if demo else settings.bybit_mainnet_api_secret) or None,
+        )
+
+    @property
+    def is_demo(self) -> bool:
+        return self._demo
+
+    async def configure(self, demo: bool) -> None:
+        """Reconstruye el cliente autenticado para operar contra demo o mainnet, sin reiniciar el
+        proceso. Lo usa exclusivamente app.live.environment.switch_to, que ya valida antes de llamar
+        que no haya ninguna instancia corriendo ni ninguna posicion abierta registrada (cambiar de
+        cuenta con algo de eso activo deja trades en la base que ya no corresponden a ninguna
+        posicion real de la cuenta que queda activa)."""
+        self._http = await asyncio.to_thread(self._build_http, demo)
+        self._demo = demo
+        self._instrument_cache.clear()
 
     async def check_connection(self) -> dict:
         """Llama a un endpoint autenticado liviano para validar las
@@ -93,8 +115,8 @@ class BybitClient:
         """Acredita un monto fijo de fondos virtuales en la cuenta de Demo
         Trading (lo decide Bybit, no se puede elegir cuanto). Solo funciona
         con demo=True, y tiene un cooldown propio entre pedidos."""
-        if not settings.bybit_demo:
-            raise RuntimeError("Solo se puede pedir fondos demo cuando BYBIT_ENV=demo")
+        if not self._demo:
+            raise RuntimeError("Solo se puede pedir fondos demo cuando el entorno activo es demo")
 
         def _call() -> dict:
             resp = self._http.request_demo_trading_funds()
@@ -237,6 +259,8 @@ class BybitClient:
                 "qty_step": float(item["lotSizeFilter"]["qtyStep"]),
                 "min_qty": float(item["lotSizeFilter"]["minOrderQty"]),
                 "tick_size": float(item["priceFilter"]["tickSize"]),
+                # valor minimo de una orden en USD (moneda de cotizacion), ademas del minimo en cantidad
+                "min_notional": float(item["lotSizeFilter"].get("minNotionalValue") or 0.0),
             }
 
         info = await asyncio.to_thread(_call)
@@ -374,6 +398,35 @@ class BybitClient:
             ]
 
         return await asyncio.to_thread(_call)
+
+    async def get_executions_between(self, symbol: str, start: dt.datetime, end: dt.datetime) -> list[dict]:
+        """Ejecuciones reales de Bybit (fills de entrada/salida y liquidaciones de funding) del simbolo en
+        [start, end], paginando con cursor. `fee`: positivo = cargo a la cuenta (convencion de Bybit), tanto
+        para comisiones de trade como para funding; ver app.live.rules.summarize_trade_costs para como se
+        separan y con que signo se usa cada una."""
+        start_ms, end_ms = int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+
+        def _call(cursor: str | None) -> dict:
+            resp = self._http.get_executions(
+                category="linear", symbol=symbol, startTime=start_ms, endTime=end_ms, limit=100,
+                **({"cursor": cursor} if cursor else {}),
+            )
+            if resp.get("retCode") != 0:
+                raise RuntimeError(resp.get("retMsg", "Error desconocido de Bybit"))
+            return resp["result"]
+
+        executions, cursor = [], None
+        while True:
+            result = await asyncio.to_thread(_call, cursor)
+            executions.extend(
+                {"exec_type": item["execType"], "fee": float(item["execFee"]),
+                 "time": dt.datetime.fromtimestamp(int(item["execTime"]) / 1000, tz=dt.timezone.utc)}
+                for item in result["list"]
+            )
+            cursor = result.get("nextPageCursor")
+            if not cursor or not result["list"]:
+                break
+        return executions
 
 
 bybit_client = BybitClient()

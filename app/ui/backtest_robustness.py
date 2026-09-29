@@ -19,11 +19,13 @@ from app.backtest.robustness import (
     stability_summary,
 )
 from app.backtest.service import prepare_market_data
+from app.exports import grid_points_table
 from app.ui import backtest_charts as charts
 from app.ui import backtest_widgets as w
 from app.ui.backtest_axes import NONE, AxesSelector, default_range, within_bounds  # noqa: F401
 from app.ui.backtest_config_panel import ConfigPanel
 from app.ui.backtest_format import METRIC_LABELS, NEG_CLASS, fmt_pct, format_metric, sign_class
+from app.ui.export_button import export_button
 
 logger = logging.getLogger(__name__)
 _SIGNED_COLUMNS = ("total_return_pct", "cagr_pct", "expectancy")
@@ -194,7 +196,12 @@ def _render_points_table(result: SensitivityResult) -> None:
         row.update({m: (round(p[m], 4) if isinstance(p.get(m), float) else p.get(m)) for m in shown})
         rows.append(row)
     with w.bordered_card():
-        w.section_title("Todas las combinaciones", "En el orden de la grilla, sin ranking. Tocá un encabezado para reordenar vos.")
+        with ui.row().classes("w-full items-start justify-between gap-4"):
+            w.section_title("Todas las combinaciones", "En el orden de la grilla, sin ranking. Tocá un encabezado para reordenar vos.")
+            export_button(
+                lambda: [grid_points_table("Sensibilidad", result.points, result.names, METRIC_LABELS)],
+                f"sensibilidad_{'_x_'.join(result.names)}", ["Sensibilidad"],
+            )
         with ui.element("div").classes("w-full overflow-x-auto"):
             table = ui.table(columns=columns, rows=rows, row_key="id", pagination=15).props("flat dense").classes("w-full")
         for key in _SIGNED_COLUMNS:
@@ -309,10 +316,15 @@ def _render_multi_results(results: list[dict]) -> None:
         row.update({k: (round(r[k], 4) if isinstance(r.get(k), float) else r.get(k)) for k in shown})
         rows.append(row)
     with w.bordered_card():
-        w.section_title(
-            f"{len(results)} combinaciones",
-            "Una combinación que rinde bien en el pasado no garantiza que rinda bien en el futuro: mirá si hay una zona estable.",
-        )
+        with ui.row().classes("w-full items-start justify-between gap-4"):
+            w.section_title(
+                f"{len(results)} combinaciones",
+                "Una combinación que rinde bien en el pasado no garantiza que rinda bien en el futuro: mirá si hay una zona estable.",
+            )
+            export_button(
+                lambda: [grid_points_table("Barrido", results, list(results[0]["params"]), METRIC_LABELS)],
+                "barrido_multiparametro", ["Barrido"],
+            )
         with ui.element("div").classes("w-full overflow-x-auto"):
             table = ui.table(columns=columns, rows=rows, row_key="n", pagination=15).props("flat dense").classes("w-full")
         for key in _SIGNED_COLUMNS:

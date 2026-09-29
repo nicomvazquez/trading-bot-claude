@@ -100,6 +100,10 @@ class Trade(Base):
     exit_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     opened_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Comisiones y funding reales de Bybit (ver app/live/closing.py), para comparar contra el backtest.
+    # NULL en trades cerrados antes de esta version o cuando no se pudieron consultar.
+    fees: Mapped[float | None] = mapped_column(Float, nullable=True)  # entrada + salida, siempre >= 0
+    funding: Mapped[float | None] = mapped_column(Float, nullable=True)  # negativo = se pago, positivo = se cobro
 
     strategy_instance: Mapped["StrategyInstance"] = relationship(back_populates="trades")
 
@@ -140,6 +144,10 @@ class BotSettings(Base):
     max_daily_loss_pct: Mapped[float] = mapped_column(Float, default=5.0)
     max_concurrent_positions: Mapped[int] = mapped_column(Integer, default=5)
     max_leverage: Mapped[float] = mapped_column(Float, default=10.0)
+    max_daily_loss_global_pct: Mapped[float | None] = mapped_column(Float, nullable=True)  # None = sin limite global
+    # Entorno de trading activo ("demo" | "mainnet"), elegido desde el dashboard. Persiste a un reinicio;
+    # las credenciales de cada uno siguen viviendo solo en .env (ver app.live.environment).
+    bybit_env: Mapped[str] = mapped_column(String, default="demo")
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),

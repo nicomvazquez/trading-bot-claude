@@ -32,6 +32,18 @@ def test_the_minimum_capital_suggested_really_works() -> None:
     assert again.ok
 
 
+def test_min_notional_rejects_even_when_qty_is_above_the_symbol_minimum() -> None:
+    # simbolo de precio bajo: la cantidad minima alcanza pero el valor en USD de la orden no
+    small = {"price": 0.05, "max_leverage": 10.0, "min_qty": 100.0, "qty_step": 100.0}
+    p = evaluate_sizing(50.0, risk_pct=1.0, stop_loss_pct=3.0, min_notional=20.0, **small)
+    assert not p.ok
+    assert p.qty >= small["min_qty"]  # la cantidad esta bien, lo que falla es el valor
+    assert "valor mínimo" in p.message
+
+    bigger = evaluate_sizing(p.min_capital * 1.01, risk_pct=1.0, stop_loss_pct=3.0, min_notional=20.0, **small)
+    assert bigger.ok
+
+
 def test_validation_messages_are_user_facing() -> None:
     with pytest.raises(InstanceError, match="nombre"):
         _validate("rsi_reversion", " ", "BTCUSDT", 100, {})

@@ -10,7 +10,22 @@ from openpyxl import load_workbook
 from app.backtest.config import BacktestConfig
 from app.backtest.engine import Backtester
 from app.backtest.metrics import compute_metrics
-from app.exports import Table, backtest_tables, instances_table, live_trades_table, to_csv, to_xlsx
+from app.backtest.monte_carlo import run_monte_carlo
+from app.backtest.robustness import run_sensitivity
+from app.backtest.service import MarketData
+from app.backtest.validation import run_in_out_sample, run_walk_forward
+from app.exports import (
+    Table,
+    backtest_tables,
+    grid_points_table,
+    instances_table,
+    live_trades_table,
+    monte_carlo_tables,
+    oos_table,
+    to_csv,
+    to_xlsx,
+    walk_forward_tables,
+)
 from app.live.stats import summarize
 from app.strategies import registry
 from app.ui.backtest_format import EXIT_REASON_LABELS, METRIC_GROUPS, METRIC_LABELS
@@ -81,15 +96,24 @@ class T:
     exit_reason: str | None
     opened_at: dt.datetime
     closed_at: dt.datetime | None
+    fees: float | None = None
+    funding: float | None = None
 
 
 def test_live_trades_table_computes_duration_and_state() -> None:
     opened = dt.datetime(2026, 9, 24, 0, 0, tzinfo=UTC)
-    trades = [T(1, 7, "BTCUSDT", "long", 0.003, 84000.0, 85000.0, 82000.0, None, 2.5, "senal", opened, opened + dt.timedelta(hours=3)),
-              T(2, 7, "BTCUSDT", "short", 0.003, 84000.0, None, None, None, None, None, opened, None)]
+    trades = [
+        T(1, 7, "BTCUSDT", "long", 0.003, 84000.0, 85000.0, 82000.0, None, 2.5, "senal", opened, opened + dt.timedelta(hours=3),
+          fees=0.075, funding=-0.007),
+        T(2, 7, "BTCUSDT", "short", 0.003, 84000.0, None, None, None, None, None, opened, None),
+    ]
     table = live_trades_table(trades, {7: "rsi-1"})
-    assert table.rows[0][1] == "rsi-1" and table.rows[0][13] == pytest.approx(3.0) and table.rows[0][14] == "Cerrado"
-    assert table.rows[1][13] is None and table.rows[1][14] == "Abierto"
+    row = dict(zip(table.headers, table.rows[0], strict=True))
+    assert row["Instancia"] == "rsi-1" and row["Duración (horas)"] == pytest.approx(3.0) and row["Estado"] == "Cerrado"
+    assert row["Comisiones (USD)"] == pytest.approx(0.075) and row["Funding (USD)"] == pytest.approx(-0.007)
+    open_row = dict(zip(table.headers, table.rows[1], strict=True))
+    assert open_row["Duración (horas)"] is None and open_row["Estado"] == "Abierto"
+    assert open_row["Comisiones (USD)"] is None and open_row["Funding (USD)"] is None  # trade abierto: todavia sin dato
     assert len(table.headers) == len(table.rows[0])
 
 
@@ -151,6 +175,71 @@ def test_backtest_export_reconciles_with_the_result_and_survives_excel() -> None
     assert wb["Operaciones"].max_row == len(result.trades) + 1
     assert wb["Equity"].max_row == len(result.equity_curve) + 1
     assert to_csv(trades).count(b"\r\n") == len(result.trades) + 1
+
+
+# ------------------------------------------------------------------ sensibilidad / walk-forward / monte carlo
+
+def _market_and_config():
+    rng = np.random.default_rng(3)
+    n = 1500
+    closes = 100 * np.exp(np.cumsum(rng.normal(0, 0.004, n)))
+    idx = pd.date_range("2026-01-01", periods=n, freq="1h", tz="UTC")
+    opens = np.concatenate([[closes[0]], closes[:-1]])
+    candles = pd.DataFrame({"open": opens, "high": np.maximum(opens, closes) * 1.002, "low": np.minimum(opens, closes) * 0.998, "close": closes, "volume": 1.0}, index=idx)
+    market = MarketData(candles=candles, quality={}, start=idx[0], end=idx[-1])
+    cls = registry.get("donchian_breakout")
+    cfg = BacktestConfig(timeframe="60", initial_capital=1000.0)
+    return cls, cls.params_model(), cfg, market
+
+
+def test_grid_points_table_reconciles_with_sensitivity_points() -> None:
+    cls, params, cfg, market = _market_and_config()
+    result = run_sensitivity(cls, params.model_dump(), [("entry_bars", [15, 20, 25])], cfg, market)
+    table = grid_points_table("Sensibilidad", result.points, result.names, METRIC_LABELS)
+    assert table.headers[0] == "entry_bars"
+    assert len(table.rows) == len(result.points) == 3
+    col = {r[0]: r for r in table.rows}
+    ret_idx = table.headers.index(METRIC_LABELS["total_return_pct"])
+    for p in result.points:
+        assert col[p["params"]["entry_bars"]][ret_idx] == pytest.approx(p["total_return_pct"])
+    to_xlsx([table])  # el archivo completo se abre sin errores
+
+
+def test_oos_table_reconciles_with_segments() -> None:
+    cls, params, cfg, market = _market_and_config()
+    in_seg, out_seg = run_in_out_sample(cls, params, cfg, market, market.candles.index[len(market.candles) // 2])
+    table = oos_table(in_seg, out_seg, METRIC_LABELS, ["total_return_pct", "num_trades"])
+    rows = {r[0]: r for r in table.rows}
+    ret_row = rows[METRIC_LABELS["total_return_pct"]]
+    assert ret_row[1] == pytest.approx(in_seg.metrics["total_return_pct"])
+    assert ret_row[2] == pytest.approx(out_seg.metrics["total_return_pct"])
+
+
+def test_walk_forward_tables_reconciles_with_result() -> None:
+    cls, params, cfg, market = _market_and_config()
+    result = run_walk_forward(cls, params, cfg, market, training_days=20, testing_days=10, step_days=10)
+    summary, windows = walk_forward_tables(result)
+    assert summary.name == "Resumen" and windows.name == "Ventanas"
+    assert len(windows.rows) == len(result.windows) == result.aggregate["n_windows"]
+    n_idx, ret_idx = windows.headers.index("Ventana"), windows.headers.index("Retorno test (%)")
+    for row, wr in zip(windows.rows, result.windows, strict=True):
+        assert row[n_idx] == wr.window.index + 1
+        expected = (wr.test_metrics or {}).get("total_return_pct")
+        assert row[ret_idx] == expected or (row[ret_idx] is None and expected is None)
+    to_xlsx([summary, windows])
+
+
+def test_monte_carlo_tables_reconciles_with_result() -> None:
+    result, *_ = _backtest()
+    mc = run_monte_carlo(result.trades, 1000.0, n_sims=200, method="bootstrap", seed=7)
+    assert mc is not None
+    summary, dist = monte_carlo_tables(mc)
+    values = {r[0]: r[1] for r in summary.rows}
+    assert values["Método"] == "bootstrap" and values["Simulaciones"] == 200
+    assert values["Retorno p50 (%)"] == pytest.approx(mc.return_pct_p50)
+    assert len(dist.rows) == 200
+    assert dist.rows[0][1] == pytest.approx(mc.returns_distribution[0])
+    to_xlsx([summary, dist])
 
 
 def test_instants_are_exported_in_argentina_time_with_that_in_the_header() -> None:

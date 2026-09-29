@@ -6,6 +6,9 @@ from nicegui import ui
 
 from app.config import settings
 from app.db.base import init_db
+from app.exchange.bybit_client import bybit_client
+from app.live import environment
+from app.live.alerts import send_alert
 from app.live.orchestrator import orchestrator
 
 logging.basicConfig(
@@ -15,24 +18,31 @@ logging.basicConfig(
 
 
 def check_security() -> None:
-    """La base de datos no debe quedar con la contrasena por defecto. En mainnet es un error fatal."""
+    """La base de datos no debe quedar con la contrasena por defecto. En mainnet es un error fatal.
+    Se llama despues de sync_from_db para reflejar el entorno REALMENTE activo, no solo el del .env
+    (BotSettings pudo haber quedado en mainnet de un reinicio anterior)."""
     if settings.db_password in ("changeme", ""):
         message = "DB_PASSWORD es la de por defecto: cambiala en .env (y en Postgres con ALTER USER)."
-        if not settings.bybit_demo:
+        if not bybit_client.is_demo:
             raise RuntimeError(message + " En MAINNET no se puede iniciar así.")
         logging.getLogger(__name__).warning(message)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    check_security()
     await init_db()
+    await environment.sync_from_db()
+    check_security()
     if settings.live_enabled:
         await orchestrator.start_all_active()
     else:
         logging.getLogger(__name__).warning("MODO DEMOSTRACION: la operativa en vivo esta desactivada (LIVE_ENABLED=false)")
     yield
     await orchestrator.shutdown()
+    # Aviso de mejor esfuerzo: solo cubre un apagado ordenado (docker compose stop/restart), no una caida
+    # abrupta del proceso (un crash o un kill -9 no llegan a correr este codigo).
+    if settings.live_enabled:
+        await send_alert("🔌 El bot se detuvo (apagado ordenado). Las posiciones abiertas siguen protegidas por su stop-loss en Bybit.")
 
 
 app = FastAPI(title="Bot Trading - Bybit Futures", lifespan=lifespan)

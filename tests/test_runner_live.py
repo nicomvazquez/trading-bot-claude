@@ -17,7 +17,10 @@ from sqlalchemy import delete, select, text
 
 from app.db.base import async_session, engine
 from app.db.models import Order, StrategyEvent, StrategyInstance, Trade
+from app.live import closing as closing_module
+from app.live import events as events_module
 from app.live import runner as runner_module
+from app.live.events import log_event
 from app.live.runner import StrategyRunner
 from app.strategies.base import Signal
 
@@ -72,12 +75,13 @@ class FakeBybit:
         self.orders: list[dict] = []
         self.fail_next_close = False
         self._position: dict | None = None
+        self.executions: list[dict] = []  # lo que debe devolver get_executions_between (comisiones/funding)
 
     async def round_qty(self, symbol, qty):
         return round(qty, 6)
 
     async def get_instrument_info(self, symbol):
-        return {"min_qty": 0.001, "qty_step": 0.001, "tick_size": 0.1}
+        return {"min_qty": 0.001, "qty_step": 0.001, "tick_size": 0.1, "min_notional": 0.0}
 
     async def place_market_order(self, symbol, side, qty, stop_loss=None, take_profit=None, reduce_only=False):
         if reduce_only and self.fail_next_close:
@@ -95,6 +99,9 @@ class FakeBybit:
 
     async def get_closed_pnl_records(self, symbol, limit=50):
         return []
+
+    async def get_executions_between(self, symbol, start, end):
+        return self.executions
 
 
 async def _make_instance(symbol_suffix: str) -> StrategyInstance:
@@ -167,9 +174,15 @@ async def test_a_failed_flip_close_never_opens_the_opposite_position():
 
 @run_async
 async def test_a_successful_flip_closes_the_old_side_and_opens_the_new_one():
-    """Complemento del test anterior: cuando el cierre SI funciona, el flip debe completarse normalmente."""
+    """Complemento del test anterior: cuando el cierre SI funciona, el flip debe completarse normalmente, y el
+    trade cerrado debe quedar con las comisiones y el funding reales que informa Bybit."""
     instance = await _make_instance(secrets.token_hex(3))
     fake = FakeBybit()
+    fake.executions = [
+        {"exec_type": "Trade", "fee": 0.055},    # entrada
+        {"exec_type": "Trade", "fee": 0.02},     # salida
+        {"exec_type": "Funding", "fee": 0.007},  # se pago funding mientras estuvo abierto
+    ]
     patches = _patch_runner(fake)
     try:
         runner = StrategyRunner(instance.id)
@@ -181,9 +194,87 @@ async def test_a_successful_flip_closes_the_old_side_and_opens_the_new_one():
         trades = await _open_trades(instance.id)
         assert len(trades) == 1 and trades[0].side == "short" and trades[0].id != long_id
         assert len(fake.orders) == 3  # abrir long, cerrar long (reduce_only), abrir short
+
+        async with async_session() as session:
+            closed_long = await session.get(Trade, long_id)
+        assert closed_long.fees == pytest.approx(0.075)   # solo las dos ejecuciones de tipo Trade
+        assert closed_long.funding == pytest.approx(-0.007)  # se pago: negativo, igual convencion que el backtest
     finally:
         _unpatch_runner(patches)
         await _cleanup(instance.id)
+
+
+@run_async
+async def test_close_many_closes_exactly_the_given_trades_regardless_of_instance():
+    """El motor del boton de emergencia: dada una lista de trades (de instancias distintas, corriendo o no),
+    los cierra a todos y devuelve un resultado por cada uno.
+
+    Deliberadamente NO se prueba aca `close_all_positions()` (la version que lee TODO lo abierto en la base):
+    esta base es la real, compartida con la app en vivo, y llamar a esa version sin acotar que trades tocar
+    cerraria tambien, sin querer, cualquier posicion real que hubiera en ese momento. Ver la advertencia en
+    app.live.closing.close_many, agregada despues de que exactamente eso pasara probando este archivo."""
+    from app.live.closing import close_many
+
+    a = await _make_instance(secrets.token_hex(3))
+    b = await _make_instance(secrets.token_hex(3))
+    fake = FakeBybit()
+    patches = _patch_runner(fake)
+    try:
+        async with async_session() as session:
+            ta = Trade(strategy_instance_id=a.id, symbol=a.symbol, side="long", entry_price=100.0, qty=1.0, opened_at=_now())
+            tb = Trade(strategy_instance_id=b.id, symbol=b.symbol, side="short", entry_price=50.0, qty=2.0, opened_at=_now())
+            session.add_all([ta, tb])
+            await session.commit()
+            await session.refresh(ta)
+            await session.refresh(tb)
+
+        results = await close_many([ta, tb])
+
+        assert {r["symbol"] for r in results} == {a.symbol, b.symbol}
+        assert all(r["ok"] for r in results)
+        assert not await _open_trades(a.id) and not await _open_trades(b.id)
+        # una orden reduce-only por posicion, en el sentido contrario a cada una
+        sent = {(o["symbol"], o["side"], o["reduce_only"]) for o in fake.orders}
+        assert sent == {(a.symbol, "Sell", True), (b.symbol, "Buy", True)}
+    finally:
+        _unpatch_runner(patches)
+        await _cleanup(a.id)
+        await _cleanup(b.id)
+
+
+@run_async
+async def test_log_event_sends_a_telegram_alert_only_for_errors():
+    """log_event es el unico lugar por donde pasan los errores de la operativa en vivo: ahi es donde se
+    dispara la alerta (ver app.live.alerts). Un evento "opened"/"closed" no debe alertar: solo lo urgente."""
+    instance = await _make_instance(secrets.token_hex(3))
+    sent = []
+
+    async def fake_send_alert(text: str) -> bool:
+        sent.append(text)
+        return True
+
+    original = events_module.send_alert
+    events_module.send_alert = fake_send_alert
+    try:
+        await log_event(instance.id, "opened", "Abierta long 1.0 TESTUSDT @ 100.00")
+        assert sent == []  # informativo: no alerta
+
+        await log_event(instance.id, "error", "Falló el envío de la orden de long: timeout")
+        assert len(sent) == 1
+        assert instance.name in sent[0] and "Falló el envío" in sent[0]
+
+        # el mismo error repetido no se vuelve a registrar (log_event lo deduplica): tampoco se re-alerta
+        await log_event(instance.id, "error", "Falló el envío de la orden de long: timeout")
+        assert len(sent) == 1
+    finally:
+        events_module.send_alert = original
+        await _cleanup(instance.id)
+
+
+def _now():
+    import datetime as dt
+
+    return dt.datetime.now(dt.timezone.utc)
 
 
 async def _fake_limits():
@@ -197,15 +288,19 @@ async def _zero() -> int:
 
 
 def _patch_runner(fake: "FakeBybit") -> dict:
-    """Reemplaza el exchange, el sleep y los limites/conteo globales del modulo runner por versiones
-    controladas, y devuelve los originales para restaurarlos con _unpatch_runner."""
+    """Reemplaza el exchange, el sleep y los limites/conteo globales por versiones controladas, y devuelve
+    los originales para restaurarlos con _unpatch_runner. app.live.closing importa bybit_client por su cuenta
+    (no a traves de runner_module), asi que hay que parchearlo ahi tambien: sin esto, cerrar una posicion
+    terminaria llamando a la Bybit real."""
     originals = {
         "bybit_client": runner_module.bybit_client,
+        "closing_bybit_client": closing_module.bybit_client,
         "sleep": asyncio.sleep,
         "_load_limits": runner_module._load_limits,
         "_global_open_positions_count": runner_module._global_open_positions_count,
     }
     runner_module.bybit_client = fake
+    closing_module.bybit_client = fake
     runner_module.asyncio.sleep = lambda _seconds: originals["sleep"](0)  # sin perder tiempo real en los reintentos
     runner_module._load_limits = lambda: _fake_limits()  # sin tocar los limites reales de la cuenta
     runner_module._global_open_positions_count = lambda: _zero()  # aislado de posiciones reales de otras instancias
@@ -214,6 +309,7 @@ def _patch_runner(fake: "FakeBybit") -> dict:
 
 def _unpatch_runner(originals: dict) -> None:
     runner_module.bybit_client = originals["bybit_client"]
+    closing_module.bybit_client = originals["closing_bybit_client"]
     runner_module.asyncio.sleep = originals["sleep"]
     runner_module._load_limits = originals["_load_limits"]
     runner_module._global_open_positions_count = originals["_global_open_positions_count"]

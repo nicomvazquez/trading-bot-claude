@@ -23,12 +23,14 @@ from app.backtest.validation import (
     run_walk_forward,
     split_from_fraction,
 )
+from app.exports import oos_table, walk_forward_tables
 from app.timeutil import fmt, local_midnight_utc
 from app.ui import backtest_charts as charts
 from app.ui import backtest_widgets as w
 from app.ui.backtest_axes import AxesSelector
 from app.ui.backtest_config_panel import ConfigPanel
 from app.ui.backtest_format import METRIC_LABELS, NEG_CLASS, fmt_pct, format_metric, sign_class
+from app.ui.export_button import export_button
 
 logger = logging.getLogger(__name__)
 
@@ -154,10 +156,15 @@ def _render_oos(in_seg: Segment, out_seg: Segment, cut, data_warnings: list[str]
         })
     rows.append({"metric": "Duración (días)", "in": f"{m_in['period_days']:.0f}", "out": f"{m_out['period_days']:.0f}"})
     with w.bordered_card():
-        w.section_title(
-            "Métricas lado a lado",
-            "Los retornos no están escalados por duración: los tramos pueden tener largos distintos.",
-        )
+        with ui.row().classes("w-full items-start justify-between gap-4"):
+            w.section_title(
+                "Métricas lado a lado",
+                "Los retornos no están escalados por duración: los tramos pueden tener largos distintos.",
+            )
+            export_button(
+                lambda: [oos_table(in_seg, out_seg, METRIC_LABELS, _COMPARED_METRICS)],
+                "fuera_de_muestra", ["Fuera de muestra"],
+            )
         ui.table(
             columns=[
                 {"name": "metric", "label": "", "field": "metric", "align": "left"},
@@ -403,7 +410,9 @@ def _render_windows_table(result: WalkForwardResult) -> None:
         {"name": "note", "label": "Nota", "field": "note", "align": "left"},
     ]
     with w.bordered_card():
-        w.section_title("Detalle por ventana", "Cada test arranca con el capital inicial y usa la historia previa solo como contexto.")
+        with ui.row().classes("w-full items-start justify-between gap-4"):
+            w.section_title("Detalle por ventana", "Cada test arranca con el capital inicial y usa la historia previa solo como contexto.")
+            export_button(lambda: walk_forward_tables(result), "walk_forward", ["Resumen", "Ventanas"])
         with ui.element("div").classes("w-full overflow-x-auto"):
             table = ui.table(columns=columns, rows=rows, row_key="n", pagination=20).props("flat dense").classes("w-full")
         table.add_slot("body-cell-return", """

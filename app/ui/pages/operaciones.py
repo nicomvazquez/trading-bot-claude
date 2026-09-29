@@ -78,12 +78,16 @@ def operaciones_page() -> None:
                               "sortable": k in ("opened", "pnl")}
                              for k, label in [("opened", "Apertura"), ("inst", "Instancia"), ("symbol", "Símbolo"), ("side", "Lado"),
                                               ("qty", "Cantidad"), ("entry", "Entrada"), ("exit", "Salida"), ("sl", "Stop"), ("tp", "TP"),
-                                              ("pnl", "PnL (USD)"), ("reason", "Motivo"), ("closed_at", "Cierre")]],
+                                              ("pnl", "PnL (USD)"), ("fees", "Comisiones"), ("funding", "Funding"),
+                                              ("reason", "Motivo"), ("closed_at", "Cierre")]],
                     rows=[{
                         "id": t.id, "opened": _fmt_dt(t.opened_at), "inst": state["names"].get(t.strategy_instance_id, "?"),
                         "symbol": t.symbol, "side": t.side, "qty": t.qty, "entry": _fmt_price(t.entry_price),
                         "exit": _fmt_price(t.exit_price), "sl": _fmt_price(t.stop_loss), "tp": _fmt_price(t.take_profit),
-                        "pnl": None if t.pnl is None else round(t.pnl, 4), "reason": EXIT_REASON_LABELS.get(t.exit_reason, t.exit_reason) if t.exit_reason else ("Abierta" if t.closed_at is None else "—"),
+                        "pnl": None if t.pnl is None else round(t.pnl, 4),
+                        "fees": fmt_usd(-t.fees) if t.fees is not None else "—",
+                        "funding": fmt_usd(t.funding, signed=True) if t.funding is not None else "—",
+                        "reason": EXIT_REASON_LABELS.get(t.exit_reason, t.exit_reason) if t.exit_reason else ("Abierta" if t.closed_at is None else "—"),
                         "closed_at": _fmt_dt(t.closed_at),
                     } for t in rows],
                     row_key="id", pagination=25,

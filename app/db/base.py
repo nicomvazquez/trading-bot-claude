@@ -20,6 +20,8 @@ _SCHEMA_PATCHES = [
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS stop_loss FLOAT",
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS take_profit FLOAT",
     "ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_reason VARCHAR",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS fees FLOAT",
+    "ALTER TABLE trades ADD COLUMN IF NOT EXISTS funding FLOAT",
     "ALTER TABLE candles ADD COLUMN IF NOT EXISTS fetched_at TIMESTAMPTZ",
     "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS strategy_version VARCHAR",
     "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS exchange VARCHAR",
@@ -27,6 +29,8 @@ _SCHEMA_PATCHES = [
     "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS config JSON",
     "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS trades JSON",
     "ALTER TABLE backtest_runs ADD COLUMN IF NOT EXISTS equity JSON",
+    "ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS max_daily_loss_global_pct FLOAT",
+    "ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS bybit_env VARCHAR DEFAULT 'demo'",
 ]
 
 

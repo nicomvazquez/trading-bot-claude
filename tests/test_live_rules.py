@@ -3,7 +3,9 @@ from dataclasses import dataclass
 
 import pytest
 
-from app.live.rules import decide_candle, find_symbol_conflict, should_adopt_position, summarize_closed_pnl
+from app.live.rules import (
+    closing_side, decide_candle, find_symbol_conflict, should_adopt_position, summarize_closed_pnl, summarize_trade_costs,
+)
 
 T = dt.datetime(2026, 9, 24, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -83,3 +85,46 @@ def test_pandas_timestamps_work_with_decide_candle_and_the_start_message() -> No
     assert decide_candle(None, newest) == "skip_initial"
     assert decide_candle(newest, newest + pd.Timedelta(minutes=15)) == "evaluate"
     assert f"{newest.strftime('%H:%M')} UTC" == "03:45 UTC"
+
+
+# ------------------------------------------------------------------ cierre de posicion
+
+def test_closing_side_is_the_opposite_of_the_position() -> None:
+    assert closing_side("long") == "Sell"
+    assert closing_side("short") == "Buy"
+
+
+# ------------------------------------------------------------------ comisiones y funding reales
+
+def exec_(exec_type: str, fee: float) -> dict:
+    return {"exec_type": exec_type, "fee": fee}
+
+
+def test_trade_fees_sum_only_trade_executions_as_a_cost() -> None:
+    costs = summarize_trade_costs([exec_("Trade", 0.055), exec_("Trade", 0.02), exec_("Funding", 0.01)])
+    assert costs.fees == pytest.approx(0.075)  # solo las dos ejecuciones de tipo Trade
+
+
+def test_maker_rebate_is_a_negative_fee_and_reduces_the_total() -> None:
+    costs = summarize_trade_costs([exec_("Trade", 0.055), exec_("Trade", -0.01)])  # salida con rebate maker
+    assert costs.fees == pytest.approx(0.045)
+
+
+def test_funding_sign_is_flipped_from_bybits_fee_convention_to_match_the_backtest() -> None:
+    """Bybit informa el funding como 'fee' (positivo = cargo a la cuenta). El backtest usa la convencion opuesta
+    (positivo = se cobro). Pagar funding (fee positivo en Bybit) debe dar funding NEGATIVO en el resultado."""
+    paid = summarize_trade_costs([exec_("Funding", 0.007)])
+    assert paid.funding == pytest.approx(-0.007) and paid.fees == 0.0
+
+    received = summarize_trade_costs([exec_("Funding", -0.001)])
+    assert received.funding == pytest.approx(0.001)
+
+
+def test_multiple_funding_settlements_are_summed() -> None:
+    costs = summarize_trade_costs([exec_("Funding", 0.007), exec_("Funding", -0.001), exec_("Funding", 0.003)])
+    assert costs.funding == pytest.approx(-(0.007 - 0.001 + 0.003))
+
+
+def test_no_executions_means_zero_cost_not_none() -> None:
+    costs = summarize_trade_costs([])
+    assert costs.fees == 0.0 and costs.funding == 0.0

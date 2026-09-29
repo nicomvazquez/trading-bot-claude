@@ -32,6 +32,11 @@ def should_adopt_position(has_local_trade: bool, has_exchange_position: bool, sy
     return has_exchange_position and not has_local_trade and not symbol_open_elsewhere
 
 
+def closing_side(position_side: str) -> str:
+    """Lado de la orden reduce-only que cierra una posicion: vender para cerrar un largo, comprar para un corto."""
+    return "Sell" if position_side == "long" else "Buy"
+
+
 # ------------------------------------------------------------------ velas
 
 CandleAction = Literal["skip_initial", "evaluate", "wait"]
@@ -68,3 +73,21 @@ def summarize_closed_pnl(records: Iterable[dict], since: dt.datetime) -> ClosedP
         avg_exit_price=last["avg_exit_price"], closed_pnl=sum(r["closed_pnl"] for r in mine),
         updated_time=last["updated_time"], records=len(mine),
     )
+
+
+# ------------------------------------------------------------------ comisiones y funding reales
+
+@dataclass
+class TradeCosts:
+    fees: float      # comisiones de entrada + salida, siempre >= 0 (costo)
+    funding: float    # neto: negativo = se pago funding, positivo = se cobro (mismo signo que en el backtest)
+
+
+def summarize_trade_costs(executions: Iterable[dict]) -> TradeCosts:
+    """A partir de las ejecuciones reales de Bybit (entradas, salidas y liquidaciones de funding) del
+    simbolo mientras el trade estuvo abierto, separa cuanto se pago de comisiones y cuanto de funding.
+    Cada ejecucion trae `exec_type` ("Trade" o "Funding", tal como lo informa Bybit) y `fee`, en la
+    convencion de Bybit: positivo = cargo a la cuenta, negativo = credito (rebate maker, o funding cobrado)."""
+    fees = sum(e["fee"] for e in executions if e["exec_type"] == "Trade")
+    funding = sum(-e["fee"] for e in executions if e["exec_type"] == "Funding")
+    return TradeCosts(fees=fees, funding=funding)
