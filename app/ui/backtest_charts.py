@@ -1,3 +1,5 @@
+import textwrap
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -211,12 +213,13 @@ def histogram(
             hovertemplate=f"{x_prefix}%{{x:.2f}}{x_suffix}: %{{y}} {unit}<extra></extra>",
         )
     )
-    for value, label, position in marks or []:
-        fig.add_vline(
-            x=value, line=dict(color=INK_2, width=1), annotation_text=label, annotation_position=position,
-            annotation_font=dict(size=11, color=INK_2),
+    for i, (value, label, position) in enumerate(sorted(marks or [], key=lambda m: m[0])):
+        fig.add_vline(x=value, line=dict(color=INK_2, width=1))
+        fig.add_annotation(
+            x=value, y=1, yref="paper", yanchor="bottom", xanchor="right" if "left" in position else "left",
+            yshift=18 * (i % 2), text=label, showarrow=False, font=dict(size=11, color=INK_2),
         )
-    fig.update_layout(**_base_layout(height=320, margin=dict(l=48, r=16, t=28, b=40), showlegend=False, bargap=0.02))
+    fig.update_layout(**_base_layout(height=320, margin=dict(l=48, r=16, t=52, b=40), showlegend=False, bargap=0.02))
     fig.update_xaxes(
         tickprefix=x_prefix, ticksuffix=x_suffix, showgrid=False, showline=True, linecolor=BASELINE,
         tickfont=dict(color=MUTED),
@@ -246,38 +249,24 @@ def optimization_bars(labels: list[str], values: list[float], metric_label: str)
     return fig
 
 
-def sensitivity_lines(result, labels: dict[str, str], neutral: dict[str, float | None]) -> go.Figure:
-    """Un grafico chico por metrica (small multiples): cada metrica tiene su
-    propia escala. Linea vertical punteada = valor actual del parametro."""
-    metrics = list(labels)
-    cols = 3
-    rows = int(np.ceil(len(metrics) / cols))
-    fig = make_subplots(rows=rows, cols=cols, subplot_titles=[labels[m] for m in metrics],
-                        vertical_spacing=0.16, horizontal_spacing=0.07)
+def sensitivity_metric(result, metric: str, label: str, neutral: float | None) -> go.Figure:
+    """Curva de una metrica contra el valor del parametro. Linea vertical punteada = valor actual."""
     name = result.names[0]
     xs = [p["params"][name] for p in result.points]
     base = result.base_params.get(name)
-    for i, metric in enumerate(metrics):
-        row, col = i // cols + 1, i % cols + 1
-        ys = [p.get(metric) for p in result.points]
-        fig.add_trace(
-            go.Scatter(
-                x=xs, y=ys, mode="lines+markers", name=labels[metric],
-                line=dict(color=BLUE, width=2),
-                marker=dict(size=8, color=BLUE, line=dict(width=2, color=SURFACE)),
-                hovertemplate=f"{name}=%{{x}}<br>{labels[metric]}: %{{y:.2f}}<extra></extra>",
-            ),
-            row=row, col=col,
-        )
-        ref = neutral.get(metric)
-        if ref is not None:
-            fig.add_hline(y=ref, row=row, col=col, line=dict(color=BASELINE, width=1))
-        if base in xs:
-            fig.add_vline(x=base, row=row, col=col, line=dict(color=MUTED, width=1, dash="dot"))
-    fig.update_xaxes(showgrid=False, showline=True, linecolor=BASELINE, tickfont=dict(color=MUTED, size=11))
+    fig = go.Figure(go.Scatter(
+        x=xs, y=[p.get(metric) for p in result.points], mode="lines+markers", name=label,
+        line=dict(color=BLUE, width=2),
+        marker=dict(size=8, color=BLUE, line=dict(width=2, color=SURFACE)),
+        hovertemplate=f"{name}=%{{x}}<br>{label}: %{{y:.2f}}<extra></extra>",
+    ))
+    if neutral is not None:
+        fig.add_hline(y=neutral, line=dict(color=BASELINE, width=1))
+    if base in xs:
+        fig.add_vline(x=base, line=dict(color=MUTED, width=1, dash="dot"))
+    fig.update_xaxes(title_text=name, showgrid=False, showline=True, linecolor=BASELINE, tickfont=dict(color=MUTED, size=11))
     fig.update_yaxes(gridcolor=GRID, zeroline=False, tickfont=dict(color=MUTED, size=11))
-    fig.update_annotations(font=dict(size=12, color=INK_2))
-    fig.update_layout(**_base_layout(height=260 * rows, margin=dict(l=48, r=16, t=40, b=36), showlegend=False))
+    fig.update_layout(**_base_layout(height=280, margin=dict(l=56, r=16, t=16, b=44), showlegend=False))
     return fig
 
 
@@ -292,11 +281,14 @@ def sensitivity_heatmap(
         colorscale, extra = [[0.0, "#e34948"], [1.0, "#f0efec"]], {}
     else:
         colorscale, extra = [[0.0, "#e34948"], [0.5, "#f0efec"], [1.0, "#2a78d6"]], {"zmid": neutral}
+    height, margin_top, margin_bottom = max(360, 46 * len(ys) + 190), 16, 100
+    plot_h = height - margin_top - margin_bottom
     fig = go.Figure(
         go.Heatmap(
             z=z, x=[str(x) for x in xs], y=[str(y) for y in ys], colorscale=colorscale, xgap=2, ygap=2,
             texttemplate="%{z:.2f}" if len(xs) * len(ys) <= 150 else None, textfont=dict(size=11, color=INK),
-            colorbar=dict(title=dict(text=metric_label, font=dict(size=11)), thickness=12, outlinewidth=0),
+            colorbar=dict(orientation="h", x=0.5, xanchor="center", y=-60 / plot_h, yanchor="top", len=0.9, thickness=10,
+                          outlinewidth=0, title=dict(text=metric_label, side="top", font=dict(size=11))),
             hovertemplate=f"{x_name}=%{{x}}<br>{y_name}=%{{y}}<br>{metric_label}: %{{z:.2f}}<extra></extra>",
             **extra,
         )
@@ -305,7 +297,7 @@ def sensitivity_heatmap(
         i, j = xs.index(base[0]), ys.index(base[1])
         fig.add_shape(type="rect", x0=i - 0.5, x1=i + 0.5, y0=j - 0.5, y1=j + 0.5, line=dict(color=INK, width=2))
     fig.update_layout(**_base_layout(
-        height=max(320, 46 * len(ys) + 120), margin=dict(l=72, r=16, t=16, b=56), showlegend=False,
+        height=height, margin=dict(l=72, r=16, t=margin_top, b=margin_bottom), showlegend=False,
     ))
     fig.update_xaxes(type="category", title_text=x_name, title_font=dict(size=12), showgrid=False, tickfont=dict(color=INK_2))
     fig.update_yaxes(type="category", title_text=y_name, title_font=dict(size=12), showgrid=False, tickfont=dict(color=INK_2))
@@ -386,7 +378,7 @@ def scenario_bars(labels: list[str], values: list[float | None], base_value: flo
     """Retorno total (%) por escenario, en el orden dado (sin ranking). Rojo = pierde, azul = gana; la linea
     punteada es el escenario base."""
     fig = go.Figure(go.Bar(
-        y=labels, x=[0 if v is None else v for v in values], orientation="h",
+        y=["<br>".join(textwrap.wrap(lbl, 18)) for lbl in labels], x=[0 if v is None else v for v in values], orientation="h",
         marker=dict(color=[LOSS if (v is not None and v < 0) else BLUE for v in values]),
         text=["sin datos" if v is None else f"{v:+.1f}%" for v in values], textposition="outside", cliponaxis=False,
         hovertemplate="%{y}<br>Retorno: %{x:.2f}%<extra></extra>",
@@ -395,7 +387,12 @@ def scenario_bars(labels: list[str], values: list[float | None], base_value: flo
     if base_value is not None:
         fig.add_vline(x=base_value, line=dict(color=MUTED, width=1, dash="dot"),
                       annotation_text="Base", annotation_position="top", annotation_font=dict(size=11, color=MUTED))
-    fig.update_layout(**_base_layout(height=max(280, 44 * len(labels) + 60), margin=dict(l=190, r=70, t=28, b=36), showlegend=False, bargap=0.35))
+    nums = [0.0] + [v for v in values if v is not None]
+    lo, hi = min(nums), max(nums)
+    pad = 0.3 * ((hi - lo) or 1.0)
+    fig.update_layout(**_base_layout(height=max(280, 44 * len(labels) + 60), margin=dict(l=8, r=8, t=28, b=36), showlegend=False, bargap=0.35))
+    fig.update_yaxes(automargin=True)
+    fig.update_xaxes(range=[lo - pad, hi + pad])
     fig.update_xaxes(gridcolor=GRID, zeroline=False, ticksuffix="%", tickfont=dict(color=MUTED))
     fig.update_yaxes(autorange="reversed", showgrid=False, tickfont=dict(color=INK_2))
     return fig

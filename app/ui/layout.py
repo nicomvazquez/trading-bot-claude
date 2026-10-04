@@ -3,10 +3,11 @@ y el contenedor de contenido. Es el unico lugar donde se definen colores y tipog
 de la interfaz; los graficos usan los mismos valores (ver backtest_charts)."""
 
 import datetime as dt
+import html
 import logging
 from contextlib import contextmanager
 
-from nicegui import ui
+from nicegui import app as nicegui_app, ui
 
 from app.config import settings
 from app.exchange.bybit_client import bybit_client
@@ -14,6 +15,11 @@ from app.live.queries import load_bot_status
 from app.timeutil import fmt, label as tz_label
 
 logger = logging.getLogger(__name__)
+
+
+def _logout() -> None:
+    nicegui_app.storage.user["authenticated"] = False
+    ui.navigate.to("/login")
 
 PRIMARY = "#2a78d6"
 POSITIVE = "#0b7a3b"
@@ -62,7 +68,11 @@ body { background: var(--page) !important; -webkit-font-smoothing: antialiased; 
 .pill-idle { background:#eef0f4; color:#5a6070; }
 .side-long { color:#0b7a3b; font-weight:600; }
 .side-short { color:#b02a2a; font-weight:600; }
-@media (max-width: 640px) { .q-table { font-size: 12px; } }
+@media (max-width: 640px) {
+  .q-table { font-size: 12px; }
+  .q-btn { min-height: 40px; min-width: 40px; }
+  .modebar-container { display: none !important; }
+}
 .manual { font-size: 15px; line-height: 1.7; color: var(--ink); max-width: 100%; }
 .manual h1 { font-size: 28px; font-weight: 700; letter-spacing: -.01em; margin: 0 0 12px; }
 .manual h2 { font-size: 21px; font-weight: 650; margin: 36px 0 10px; padding-top: 18px; border-top: 1px solid var(--line); }
@@ -91,9 +101,11 @@ ui.add_head_html(
 
 
 def pill(text: str, kind: str = "idle", icon_dot: bool = True) -> ui.html:
-    """Etiqueta de estado (good | warn | bad | idle)."""
+    """Etiqueta de estado (good | warn | bad | idle). `text` se escapa siempre: aunque hoy todos
+    los llamados usan literales fijos, no cuesta nada blindarlo por si algun dia alguien le pasa
+    un dato que viene de la base (nombre de instancia, simbolo, etc.)."""
     dot = '<span class="dot"></span>' if icon_dot else ""
-    return ui.html(f'<span class="pill pill-{kind}">{dot}{text}</span>', sanitize=False)
+    return ui.html(f'<span class="pill pill-{kind}">{dot}{html.escape(text)}</span>', sanitize=False)
 
 
 def render_nav(active_path: str) -> None:
@@ -114,6 +126,11 @@ def render_nav(active_path: str) -> None:
                         with ui.link(target=path).classes("nav-link" + (" active" if path == active_path else "")):
                             ui.icon(icon, size="20px")
                             ui.label(label)
+
+            with ui.column().classes("w-full gap-2"):
+                with ui.row().classes("nav-link cursor-pointer").on("click", _logout):
+                    ui.icon("logout", size="20px")
+                    ui.label("Cerrar sesión")
 
             with ui.column().classes("w-full gap-2 rounded-xl p-3").style("background:#f6f7fa"):
                 ui.html(

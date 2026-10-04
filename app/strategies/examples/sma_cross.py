@@ -20,6 +20,8 @@ class SmaCrossStrategy(Strategy):
         "Solo opera largos. Sigue tendencias: gana en mercados alcistas y direccionales y pierde en laterales."
     )
     params_model = SmaCrossParams
+    style = "Tendencia"
+    default_timeframe = "60"  # ver app/docs/estrategias.md: pensada para 1h-4h, no para 15 min
 
     def on_candle(self, ctx: StrategyContext) -> Signal | None:
         params: SmaCrossParams = self.params

@@ -401,5 +401,17 @@ Conocelas para no sobreinterpretar:
 ## 10. Reproducibilidad y descarga
 
 - Cada corrida guarda su **configuración completa**, la **versión de la estrategia** (con una huella del código), la **semilla** de Monte Carlo, las operaciones y la curva de capital, para poder repetirla exactamente. Con **Clonar configuración** la cargás en el panel con un clic. Si cambia la lógica de la estrategia, cambia la huella.
-- **Descargar resultados** (Excel o CSV) exporta, en hojas separadas: **Métricas**, **Avisos**, **Configuración**, **Operaciones** (una fila por trade, con todos los costos) y **Equity** (curva y drawdown). Las cifras salen con toda su precisión.
 - Pasos para reproducir un resultado: mismos símbolo, timeframe, período, parámetros, costos y semilla.
+
+**Hay un botón Descargar en cada resultado**, no solo en el principal. Cada uno exporta a Excel (todas las hojas) o CSV (una hoja a la vez):
+
+| Dónde | Qué exporta |
+|---|---|
+| Overview (resultado principal) | Métricas, Avisos, Configuración, Operaciones (una fila por trade, con todos los costos) y Equity (curva y drawdown). Las cifras salen con toda su precisión, sin el redondeo de pantalla. |
+| Robustness → Sensibilidad | Todas las combinaciones probadas, con sus parámetros y métricas completas. |
+| Robustness → Barrido multi-parámetro | Lo mismo, para el barrido avanzado. |
+| Validation → Fuera de muestra | Las métricas de los dos tramos (in-sample y out-of-sample) lado a lado. |
+| Validation → Walk-forward | Dos hojas: Resumen (agregados de todas las ventanas) y Ventanas (detalle completo de cada una). |
+| Monte Carlo | Dos hojas: Resumen (percentiles, probabilidad de pérdida y de ruina) y Distribución (cada una de las simulaciones, no solo lo que se ve en pantalla). |
+| Stress Test | Sensibilidad a costos y los diez escenarios fijos (ver sección 6.8). |
+| History | Una corrida guardada, o el listado completo. |

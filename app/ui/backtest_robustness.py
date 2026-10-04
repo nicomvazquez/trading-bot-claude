@@ -149,10 +149,13 @@ def render_sensitivity(result: SensitivityResult, data_warnings: list[str]) -> N
         with w.bordered_card():
             w.section_title(
                 f"Efecto de {result.names[0]}",
-                "Una línea por métrica, cada una en su propia escala. La línea punteada vertical marca el valor actual.",
+                "Una curva por métrica, cada una en su propia escala. La línea punteada vertical marca el valor actual.",
             )
-            labels = {m: METRIC_LABELS[m] for m in SENSITIVITY_METRICS}
-            ui.plotly(charts.sensitivity_lines(result, labels, NEUTRAL_VALUE)).classes("w-full")
+            with ui.element("div").classes("grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full"):
+                for metric in SENSITIVITY_METRICS:
+                    with ui.column().classes("w-full min-w-0 gap-1"):
+                        ui.label(METRIC_LABELS[metric]).classes("text-sm font-semibold text-gray-700")
+                        ui.plotly(charts.sensitivity_metric(result, metric, METRIC_LABELS[metric], NEUTRAL_VALUE.get(metric))).classes("w-full")
     else:
         _render_heatmap_card(result)
 
@@ -221,7 +224,7 @@ def _build_multi_sweep(panel: ConfigPanel) -> None:
         "Barre todos los parámetros a la vez (producto cartesiano). Útil para explorar; para juzgar robustez "
         "usá la sensibilidad de arriba y validá fuera de muestra."
     ).classes("text-sm text-gray-500")
-    form_box = ui.element("div").classes("grid grid-cols-[minmax(0,2fr)_1fr_1fr_1fr] gap-x-3 gap-y-3 w-full items-center")
+    form_box = ui.element("div").classes("grid grid-cols-3 sm:grid-cols-[minmax(0,2fr)_1fr_1fr_1fr] gap-x-3 gap-y-3 w-full items-center")
     fields: dict = {}
     holder: dict = {}
 
@@ -238,17 +241,15 @@ def _build_multi_sweep(panel: ConfigPanel) -> None:
         form_box.clear()
         fields.clear()
         with form_box:
-            for header in ("Parámetro", "Mínimo", "Máximo", "Paso"):
-                ui.label(header).classes("text-xs uppercase tracking-wide text-gray-500")
             for name, field in panel.strategy_cls.params_model.model_fields.items():
-                ui.label(field.description or name).classes("text-sm text-gray-800")
+                ui.label(field.description or name).classes("text-sm text-gray-800 col-span-3 sm:col-span-1")
                 if field.annotation not in (int, float):
                     ui.label(f"Fijo: {field.default}").classes("text-sm text-gray-500 col-span-3")
                     continue
                 is_int = field.annotation is int
-                min_in = _outlined(ui.number(value=field.default))
-                max_in = _outlined(ui.number(value=field.default))
-                step_in = _outlined(ui.number(value=1 if is_int else 0.1))
+                min_in = _outlined(ui.number("Mínimo", value=field.default))
+                max_in = _outlined(ui.number("Máximo", value=field.default))
+                step_in = _outlined(ui.number("Paso", value=1 if is_int else 0.1))
                 for element in (min_in, max_in, step_in):
                     element.on_value_change(lambda _: update_count())
                 fields[name] = (min_in, max_in, step_in, is_int)

@@ -34,6 +34,8 @@ class DonchianBreakoutStrategy(Strategy):
         "Gana en tendencias fuertes y pierde pequeñas cantidades repetidas en mercados laterales."
     )
     params_model = DonchianParams
+    style = "Tendencia · ruptura"
+    default_timeframe = "60"
 
     def on_candle(self, ctx: StrategyContext) -> Signal | None:
         p: DonchianParams = self.params

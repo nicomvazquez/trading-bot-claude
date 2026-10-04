@@ -81,7 +81,7 @@ class ConfigPanel:
         """Selector de rango de fechas (hora local, Argentina): un calendario para elegir desde y hasta, mas atajos de uso comun."""
         today = local_today()
         with ui.column().classes("col-span-2 md:col-span-4 gap-2"):
-            with ui.row().classes("w-full items-start gap-3 no-wrap"):
+            with ui.row().classes("w-full items-start gap-3"):
                 self._range_input = ui.input(f"Rango de fechas · {tz_label()}").props("outlined dense readonly").classes("w-full max-w-md cursor-pointer")
                 with self._range_input:
                     with ui.menu().props("no-parent-event") as menu:

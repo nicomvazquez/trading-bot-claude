@@ -35,15 +35,16 @@ Después abrí **http://localhost:8080** (o `http://IP-DEL-SERVIDOR:8080` desde 
 | `docker compose stop` | Apaga todo (las posiciones abiertas siguen en Bybit con su stop-loss). |
 | `docker compose --profile demo up -d app-demo` | Levanta la **copia de demostración** (ver sección 7). |
 
-> **Importante:** el dashboard **no tiene login**. Está pensado para un servidor privado. No lo expongas a internet. Ver sección 9.
+> **Importante:** el dashboard pide usuario y contraseña, pero es de un solo operador (no hay base de usuarios). Igual está pensado para un servidor privado: no lo expongas directo a internet. Ver sección 9.
 
 ### Configuración inicial (una sola vez)
 
 1. Copiá `.env.example` a `.env`.
 2. Creá una API key de **Demo Trading** en bybit.com (perfil → API → Create New Key), activando el interruptor *Demo Trading* antes de generarla. **Sin permiso de retiro.** La clave de demo es distinta de la de mainnet.
 3. Completá en `.env`: `BYBIT_API_KEY`, `BYBIT_API_SECRET` y una `DB_PASSWORD` larga y única. Dejá `BYBIT_ENV=demo`.
-4. `docker compose up -d` y abrí el dashboard. En **Configuración → Probar conexión** tiene que decir *Conexión correcta*.
-5. En Configuración podés pulsar **Pedir fondos demo** para cargar saldo virtual.
+4. Corré `python -m app.tools.set_password` (o `docker compose exec app python -m app.tools.set_password` si ya levantaste los contenedores) y pegá las dos líneas que imprime (`APP_USER`, `APP_PASSWORD_HASH`) en `.env`. Generá también `APP_STORAGE_SECRET` una sola vez con `python -c "import secrets; print(secrets.token_hex(32))"`. Sin estos dos valores la app no arranca.
+5. `docker compose up -d` y abrí el dashboard: primero te va a pedir login. En **Configuración → Probar conexión** tiene que decir *Conexión correcta*.
+6. En Configuración podés pulsar **Pedir fondos demo** para cargar saldo virtual.
 
 ## 3. El mapa de pantallas
 
@@ -83,7 +84,7 @@ El historial de todo lo que hizo el bot. Se actualiza cada 20 segundos.
 
 Acá se crean y controlan las instancias. Una **instancia** es una estrategia ya configurada: con su símbolo, timeframe, capital y parámetros. Podés tener varias instancias de la misma estrategia.
 
-**Catálogo.** Arriba están las estrategias disponibles, con una descripción. El botón *Crear instancia* abre el formulario.
+**Catálogo.** Arriba están las estrategias disponibles, cada una con un tag de tipo (Tendencia, Reversión, Contrarian, Ruptura...), su timeframe sugerido y una descripción. El botón *Crear instancia* abre el formulario.
 
 **Formulario de instancia:**
 
@@ -91,12 +92,12 @@ Acá se crean y controlan las instancias. Una **instancia** es una estrategia ya
 |---|---|
 | Nombre | Único. Es como la vas a ver en todo el sistema. |
 | Símbolo | El par de Bybit, por ejemplo `BTCUSDT`. Se valida contra Bybit. |
-| Timeframe | Cada cuánto cierra una vela: 1, 5, 15 minutos, 1 hora, 4 horas o 1 día. |
+| Timeframe | Cada cuánto cierra una vela: 1, 5, 15 minutos, 1 hora, 4 horas o 1 día. Se precarga con el sugerido de la estrategia elegida (podés cambiarlo). |
 | Capital asignado (USD) | **Capital virtual** de esta instancia. No reserva fondos en Bybit: solo se usa para calcular el tamaño de cada operación. |
-| Parámetros | Los de la estrategia. Al pasar el mouse por cada etiqueta de la tarjeta ves su descripción. |
-| Chequeo de tamaño | Simula cuánto abriría con esos datos y avisa si quedaría por debajo del mínimo del símbolo (ver 4.4). |
+| Parámetros | Los de la estrategia, en dos columnas. Pasá el mouse por cada campo para ver su descripción completa (algunas etiquetas se truncan). |
+| Chequeo de tamaño | Simula cuánto abriría con esos datos y avisa si quedaría por debajo del mínimo del símbolo, en cantidad o en valor (ver 4.4). |
 
-**Tarjeta de cada instancia:** estado, interruptor *Activa*, capital, PnL realizado (en USD y %), PnL de hoy, cantidad de trades, win rate, profit factor, posición abierta, última actividad y los parámetros como etiquetas.
+**Tarjeta de cada instancia:** estado, interruptor *Activa*, y dos filas de estadísticas: la principal (capital, PnL realizado, PnL de hoy, posición abierta) y una secundaria más chica debajo (trades, win rate, profit factor, última actividad). Los parámetros y la actividad quedan en dos secciones desplegables aparte, para no saturar la tarjeta.
 
 **Acciones:**
 
@@ -105,6 +106,7 @@ Acá se crean y controlan las instancias. Una **instancia** es una estrategia ya
 - **Editar:** cambia cualquier valor. Si está corriendo, se reinicia con los nuevos valores y **conserva la posición abierta**.
 - **Duplicar:** crea una copia apagada, para probar variantes.
 - **Eliminar:** solo si está apagada y no tiene trades. Si tiene historial, no se elimina, para no perder ese registro.
+- **Parámetros:** sección desplegable con cada parámetro como etiqueta (pasá el mouse para ver su descripción).
 - **Actividad reciente:** una bitácora desplegable con lo que hizo la instancia: encendida, apagada, abierta, cerrada, **señal rechazada** (con el motivo) o error. Es lo primero que hay que mirar cuando una instancia "no opera".
 
 ### 3.4 Backtesting
@@ -217,11 +219,13 @@ Es una copia del dashboard con datos **sintéticos** en una base aparte (`tradin
 
 ## 9. Seguridad
 
-- **Sin login.** El dashboard permite encender y apagar el bot, cambiar límites y ver posiciones. Cualquiera que llegue al puerto lo controla. Usalo en un servidor privado.
+- **Login obligatorio, de un solo operador.** Usuario y contraseña fijos por `.env` (`APP_USER`/`APP_PASSWORD_HASH`, generados con `python -m app.tools.set_password`). La contraseña se guarda hasheada, nunca en texto plano. Tras 5 intentos fallidos seguidos el login se bloquea 5 minutos y, si tenés alertas configuradas, te llega un aviso por Telegram. La sesión dura mientras no cierres sesión o borres las cookies del navegador (botón **Cerrar sesión** en el menú).
+- Aun con login, seguí tratándolo como un servidor privado: no fue pensado para exponerlo directo a internet.
 - Postgres (5432) solo escucha en `127.0.0.1`.
 - El dashboard escucha en `APP_BIND` (`0.0.0.0` = toda la red). Si el servidor tiene salida a internet, poné `APP_BIND=127.0.0.1` y accedé por túnel SSH o VPN, o cerrá el puerto en el firewall.
-- Las claves de Bybit viven solo en `.env` (excluido de git). Creá la API key **sin permiso de retiro** y, si podés, restringida a la IP de tu servidor.
-- La app avisa si `DB_PASSWORD` es la de por defecto y, en MAINNET, se niega a arrancar.
+- Las claves de Bybit viven solo en `.env` (excluido de git; en el servidor conviene que el archivo tenga permisos `600`). Creá la API key **sin permiso de retiro** y, si podés, restringida a la IP de tu servidor.
+- La app avisa si `DB_PASSWORD` es la de por defecto y, en MAINNET, se niega a arrancar. Tampoco arranca (en ningún entorno) si falta `APP_PASSWORD_HASH` o `APP_STORAGE_SECRET`.
+- El contenedor de la app corre con un usuario sin privilegios (no root) y con límites de memoria/CPU, para que un problema del proceso no se lleve puesto el resto del servidor.
 
 ### Pasar a mainnet
 

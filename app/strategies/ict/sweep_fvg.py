@@ -6,6 +6,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 from pydantic import BaseModel, Field
 
 from app.strategies.base import Signal, Strategy, StrategyContext
+from app.strategies.indicators import atr_padded, swing_indices
 from app.strategies.registry import register
 
 _NY = ZoneInfo("America/New_York")
@@ -28,31 +29,6 @@ class IctSweepFvgParams(BaseModel):
     london_end: int = Field(default=5, ge=0, le=24, description="Kill zone Londres: fin (hora NY)")
     ny_start: int = Field(default=7, ge=0, le=24, description="Kill zone Nueva York: inicio (hora NY)")
     ny_end: int = Field(default=10, ge=0, le=24, description="Kill zone Nueva York: fin (hora NY)")
-
-
-def _swing_indices(highs: np.ndarray, lows: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
-    """Indices de swing highs / swing lows confirmados: extremo estricto
-    (sin empates) frente a n velas a cada lado."""
-    empty = np.array([], dtype=int)
-    if len(highs) < 2 * n + 1:
-        return empty, empty
-    win_h = sliding_window_view(highs, 2 * n + 1)
-    win_l = sliding_window_view(lows, 2 * n + 1)
-    center_h = win_h[:, n]
-    center_l = win_l[:, n]
-    is_high = (center_h == win_h.max(axis=1)) & ((win_h == center_h[:, None]).sum(axis=1) == 1)
-    is_low = (center_l == win_l.min(axis=1)) & ((win_l == center_l[:, None]).sum(axis=1) == 1)
-    return np.nonzero(is_high)[0] + n, np.nonzero(is_low)[0] + n
-
-
-def _atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray) -> np.ndarray:
-    prev_close = np.concatenate(([closes[0]], closes[:-1]))
-    tr = np.maximum.reduce([highs - lows, np.abs(highs - prev_close), np.abs(lows - prev_close)])
-    atr = np.full(len(tr), np.nan)
-    if len(tr) >= _ATR_PERIOD:
-        cs = np.concatenate(([0.0], np.cumsum(tr)))
-        atr[_ATR_PERIOD - 1:] = (cs[_ATR_PERIOD:] - cs[:-_ATR_PERIOD]) / _ATR_PERIOD
-    return atr
 
 
 @register
@@ -78,6 +54,8 @@ class IctSweepFvgStrategy(Strategy):
         "mecha de la barrida y take profit en múltiplo del riesgo."
     )
     params_model = IctSweepFvgParams
+    style = "ICT · estructura"
+    default_timeframe = "15"
 
     def __init__(self, params: BaseModel) -> None:
         super().__init__(params)
@@ -112,8 +90,8 @@ class IctSweepFvgStrategy(Strategy):
         h = w["high"].to_numpy(dtype=float)
         l = w["low"].to_numpy(dtype=float)
         c = w["close"].to_numpy(dtype=float)
-        atr = _atr(h, l, c)
-        swing_highs, swing_lows = _swing_indices(h, l, p.swing_n)
+        atr = atr_padded(h, l, c, _ATR_PERIOD)
+        swing_highs, swing_lows = swing_indices(h, l, p.swing_n)
 
         if bias >= 0:
             signal = self._find_setup(True, w, o, h, l, c, atr, swing_lows)
@@ -148,7 +126,7 @@ class IctSweepFvgStrategy(Strategy):
         if len(closed) > 0:
             closed = closed.set_axis(recent_idx[recent_idx < bucket])
             htf = closed.resample("4h").agg({"high": "max", "low": "min"}).dropna()
-            hh, ll = _swing_indices(htf["high"].to_numpy(dtype=float), htf["low"].to_numpy(dtype=float), p.htf_swing_n)
+            hh, ll = swing_indices(htf["high"].to_numpy(dtype=float), htf["low"].to_numpy(dtype=float), p.htf_swing_n)
             if len(hh) >= 2 and len(ll) >= 2:
                 highs = htf["high"].to_numpy(dtype=float)[hh[-2:]]
                 lows = htf["low"].to_numpy(dtype=float)[ll[-2:]]

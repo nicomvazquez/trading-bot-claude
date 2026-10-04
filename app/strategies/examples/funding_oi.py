@@ -43,6 +43,8 @@ class FundingOiStrategy(Strategy):
     )
     params_model = FundingOiParams
     required_data = ("funding", "open_interest")
+    style = "Contrarian · evento"
+    default_timeframe = "240"
 
     def on_candle(self, ctx: StrategyContext) -> Signal | None:
         p: FundingOiParams = self.params

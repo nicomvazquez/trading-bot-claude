@@ -69,9 +69,9 @@ def _label_with_help(label: str, help_text: str | None) -> None:
 
 
 def _tile(label: str, value: str, sub: str | None = None, help_text: str | None = None, color_class: str = "") -> None:
-    with ui.card().props("flat bordered").classes("p-4 gap-1 justify-between"):
+    with ui.card().props("flat bordered").classes("p-4 gap-1 justify-between min-w-0"):
         _label_with_help(label, help_text)
-        ui.label(value).classes(f"text-2xl font-semibold tracking-tight num {color_class}")
+        ui.label(value).classes(f"text-xl sm:text-2xl font-semibold tracking-tight num break-words {color_class}")
         if sub:
             ui.label(sub).classes("text-xs text-gray-500 num")
 
@@ -134,7 +134,7 @@ def render_overview(metrics: dict, result: BacktestResult) -> None:
                 _label_with_help("Retorno total", METRIC_HELP["total_return_pct"])
                 with ui.row().classes("items-center gap-2 no-wrap"):
                     ui.icon("trending_up" if ret >= 0 else "trending_down", size="40px").classes(color)
-                    ui.label(fmt_pct(ret, signed=True)).classes(f"text-5xl font-semibold {color}")
+                    ui.label(fmt_pct(ret, signed=True)).classes(f"text-4xl sm:text-5xl font-semibold break-words {color}")
             with ui.column().classes("gap-1"):
                 ui.label(
                     f"{fmt_usd(metrics['final_equity'])} finales sobre {fmt_usd(metrics['initial_equity'])} iniciales"

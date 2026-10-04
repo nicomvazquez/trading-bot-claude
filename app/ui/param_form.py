@@ -31,16 +31,16 @@ def render_param_form(
             return handler
 
         if field.annotation is bool:
-            ui.switch(label, value=bool(default)).on_value_change(make_handler(field_name))
+            ui.switch(label, value=bool(default)).on_value_change(make_handler(field_name)).tooltip(label)
         elif field.annotation in (int, float):
             step = 1 if field.annotation is int else 0.1
             ui.number(label, value=default, step=step).props("outlined dense").classes("w-full").on_value_change(
                 make_handler(field_name)
-            )
+            ).tooltip(label)
         else:
             ui.input(label, value=str(default) if default is not None else "").props(
                 "outlined dense"
-            ).classes("w-full").on_value_change(make_handler(field_name))
+            ).classes("w-full").on_value_change(make_handler(field_name)).tooltip(label)
 
     def get_model() -> BaseModel:
         return model_cls(**values)

@@ -24,6 +24,10 @@ services:
     env_file: .env
     environment:
       DB_HOST: db
+    # Red de seguridad: un proceso que se cuelga o pierde memoria no debe poder ahogar el resto
+    # del servidor. Generoso a proposito (un backtest pesado usa RAM real).
+    mem_limit: 2g
+    cpus: 2.0
     ports:
       - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8080}:8080"  # APP_BIND=127.0.0.1 para no exponer el dashboard a la red
     volumes:
@@ -50,6 +54,8 @@ services:
       DB_HOST: db
       DB_NAME: trading_demo
       LIVE_ENABLED: "false"
+    mem_limit: 1g
+    cpus: 1.0
     ports:
       - "${APP_BIND:-0.0.0.0}:8081:8080"
     volumes:

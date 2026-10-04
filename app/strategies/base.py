@@ -47,6 +47,8 @@ class Strategy(ABC):
     required_data: ClassVar[tuple[str, ...]] = ()
     description: ClassVar[str] = ""  # una o dos frases: que hace la estrategia y cuando opera
     version: ClassVar[str] = "1"  # subir cuando cambia la logica: queda registrado en cada backtest
+    style: ClassVar[str] = ""  # etiqueta corta para el catalogo: "Tendencia", "Reversión", "Ruptura"...
+    default_timeframe: ClassVar[str] = "15"  # timeframe sugerido: precarga el formulario de nueva instancia
 
     def __init__(self, params: BaseModel) -> None:
         self.params = params

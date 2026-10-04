@@ -1,5 +1,6 @@
 """Pestaña History: corridas guardadas con Ver, Clonar, Comparar, Descargar y Eliminar."""
 
+import html
 import logging
 from typing import Awaitable, Callable
 
@@ -299,8 +300,10 @@ def render_comparison(runs: list[BacktestRun]) -> None:
         )
         with ui.row().classes("gap-2 flex-wrap"):
             for color, name in zip(charts.SERIES_COLORS, names, strict=False):
+                # name incluye el simbolo que se tipeo al armar el backtest: se escapa por las dudas
+                # (en la practica nunca llega uno invalido, porque Bybit lo rechaza antes de guardar la corrida).
                 ui.html(f'<span style="display:inline-flex;align-items:center;gap:8px;padding:3px 12px;border:1px solid #e3e6ec;'
-                        f'border-radius:999px;font-size:13px"><span style="width:10px;height:10px;border-radius:50%;background:{color}"></span>{name}</span>', sanitize=False)
+                        f'border-radius:999px;font-size:13px"><span style="width:10px;height:10px;border-radius:50%;background:{color}"></span>{html.escape(name)}</span>', sanitize=False)
 
     mismatches = []
     if len({r.symbol for r in runs}) > 1:

@@ -51,6 +51,9 @@ def test_every_registered_strategy_is_documented_with_its_real_parameters(key: s
         if isinstance(default, bool):
             assert cells[1] == ("Sí" if default else "No"), f"{key}.{name}: por defecto documentado {cells[1]!r}, real {default}"
             continue
+        if isinstance(default, str):
+            assert cells[1].strip("`\"") == default, f"{key}.{name}: por defecto documentado {cells[1]!r}, real {default!r}"
+            continue
         if " / " in cells[0]:  # fila que agrupa varios parametros (p. ej. london_start / london_end): "2 / 5"
             names = re.findall(r"`(\w+)`", cells[0])
             documented = [_num(x) for x in cells[1].split("/")]
@@ -59,7 +62,9 @@ def test_every_registered_strategy_is_documented_with_its_real_parameters(key: s
         assert _num(cells[1]) == pytest.approx(default), f"{key}.{name}: por defecto documentado {cells[1]}, real {default}"
         lo, hi = _bounds(field)
         if lo is not None and hi is not None:
-            documented_lo, documented_hi = (_num(x) for x in re.split(r"[–-]", cells[2]))
+            m = re.match(r"\s*(-?[\d.,]+)\s*[–-]\s*(-?[\d.,]+)\s*$", cells[2])
+            assert m, f"{key}.{name}: rango ilegible {cells[2]!r}"
+            documented_lo, documented_hi = _num(m.group(1)), _num(m.group(2))
             assert (documented_lo, documented_hi) == (pytest.approx(lo), pytest.approx(hi)), (
                 f"{key}.{name}: rango documentado {cells[2]}, real {lo}–{hi}"
             )

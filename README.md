@@ -51,10 +51,15 @@ NiceGUI), sobre Postgres/TimescaleDB.
 cp .env.example .env
 # completar BYBIT_API_KEY y BYBIT_API_SECRET en .env con las de Demo Trading
 
+python -m app.tools.set_password           # o: docker compose exec app python -m app.tools.set_password
+# pegar las dos líneas que imprime (APP_USER, APP_PASSWORD_HASH) en .env, y generar APP_STORAGE_SECRET
+# con: python -c "import secrets; print(secrets.token_hex(32))"
+
 docker compose up --build
 ```
 
-Abrir http://localhost:8080
+Abrir http://localhost:8080. El dashboard exige login (usuario/contraseña fijos de `.env`); sin
+`APP_PASSWORD_HASH`/`APP_STORAGE_SECRET` configurados, la app se niega a arrancar.
 
 ## Documentación
 
@@ -80,17 +85,25 @@ docker compose exec -e PYTHONPATH=/app app python scripts/validate_strategies.py
 
 ## Seguridad y red
 
-El dashboard **no tiene login**: está pensado para correr en un servidor privado.
-
+- **Login obligatorio.** Usuario/contraseña fijos por `.env` (un solo operador, sin base de usuarios). La
+  contraseña se guarda hasheada (PBKDF2-HMAC-SHA256, salt aleatorio), nunca en texto plano; se genera con
+  `python -m app.tools.set_password`, que la pide por teclado sin mostrarla en pantalla. La sesión usa una
+  cookie firmada (`APP_STORAGE_SECRET`, generar una sola vez). Tras 5 intentos fallidos seguidos, el login
+  se bloquea 5 minutos y (si están configuradas) manda una alerta por Telegram.
 - Postgres (5432) se publica solo en `127.0.0.1`; la app lo usa por la red interna de Docker.
 - El dashboard escucha en `APP_BIND` (por defecto `0.0.0.0`, toda la red). Si el servidor tiene otras redes
-  o salida a internet, poné `APP_BIND=127.0.0.1` y accedé por túnel SSH/VPN, o cerrá el puerto en el firewall.
+  o salida a internet, poné `APP_BIND=127.0.0.1` y accedé por túnel SSH/VPN, o cerrá el puerto en el firewall
+  (el login reduce el riesgo de exponerlo, pero no lo elimina: seguí prefiriendo una red privada).
 - Cambiá `DB_PASSWORD` antes del primer arranque. En una base ya creada, el cambio hay que hacerlo también dentro
   de Postgres: `ALTER USER <usuario> WITH PASSWORD '<nueva>';`. Con la contraseña por defecto la app avisa al
   iniciar y se niega a operar en mainnet así.
-- Las API keys de Bybit (demo y mainnet) van solo en `.env` (está en `.gitignore`). Creá las keys **sin permiso de
-  retiro**. El cambio de entorno demo/mainnet se hace desde el dashboard, nunca automáticamente: exige confirmación
+- Las API keys de Bybit (demo y mainnet) van solo en `.env` (está en `.gitignore`; en el host debería tener
+  permisos `600`, legible solo por el usuario que corre Docker). Creá las keys **sin permiso de retiro**. El
+  cambio de entorno demo/mainnet se hace desde el dashboard, nunca automáticamente: exige confirmación
   explícita y bloquea el cambio si hay instancias corriendo o posiciones abiertas.
+- El contenedor de la app corre con un usuario sin privilegios (no root), con límites de memoria/CPU en
+  `docker-compose.yml`, y CI corre `pip-audit` en cada push para detectar vulnerabilidades conocidas en las
+  dependencias.
 
 ## Datos de demostración
 
@@ -108,6 +121,25 @@ docker compose --profile demo stop app-demo       # apagarla
 Usa la base `trading_demo` y `LIVE_ENABLED=false`: no arranca runners ni permite encender instancias, así que
 nunca envía órdenes. El sembrado borra y recrea todas las tablas y se niega a correr sobre una base cuyo nombre
 no termine en `_demo`. Los datos son sintéticos (no son resultados reales).
+
+### Datos de ejemplo en la base real (para una presentación puntual)
+
+A diferencia de lo anterior, estas dos herramientas agregan datos a la base **real** (nunca la borran ni la
+pisan) — pensadas para tener algo que mostrar en una demo sin esperar semanas de operativa real:
+
+```bash
+# Operaciones sorteadas al azar según una tasa de aciertos configurada (ver app/tools/demo_data.py)
+docker compose exec app python -m app.tools.seed_presentation
+
+# Backtest REAL (motor real, datos históricos reales) guardado como si fuera la operativa de una instancia
+docker compose exec app python -m app.tools.seed_real_backtest_instance <estrategia> <símbolo> <timeframe> <días> [nombre]
+# ejemplo: docker compose exec app python -m app.tools.seed_real_backtest_instance sma_cross BTCUSDT 15 90
+```
+
+Las dos crean instancias **apagadas** (`is_active=False`): el orquestador nunca las enciende ni manda órdenes
+con esa configuración. Las dos se niegan a correr si el nombre de instancia ya existe (nunca pisan una fila
+real) y nunca tocan `bot_settings`. Hacé un `pg_dump` antes si vas a usarlas (ver sección Mantenimiento del
+manual de uso) — no son destructivas, pero es una buena práctica antes de escribir en la base real.
 
 ## Operativa en vivo: reglas
 
@@ -143,6 +175,7 @@ cada push.
 ```
 app/
   config.py             Configuración vía .env (pydantic-settings)
+  auth.py                Login del dashboard (hash de contraseña, bloqueo por intentos, middleware)
   db/                    Modelos SQLAlchemy y conexión a Postgres
   exchange/              Wrapper sobre pybit (Bybit)
   strategies/
@@ -155,9 +188,10 @@ app/
                          cambio de entorno demo/mainnet, alertas, eventos
   backtest/              Motor de backtest, métricas, Monte Carlo, walk-forward, sensibilidad, stress tests
   exports.py             Exportación a Excel/CSV (operativa en vivo y backtester)
+  tools/                 CLI: set_password, seed_demo, seed_presentation, seed_real_backtest_instance
   ui/
     param_form.py         Genera formularios NiceGUI desde el schema pydantic de cada estrategia
-    pages/                 Páginas del dashboard
+    pages/                 Páginas del dashboard (incluye login.py)
   main.py                Arma la app FastAPI + NiceGUI
 scripts/                 Herramientas de línea de comandos (validación de estrategias)
 tests/                   Suite de pytest
@@ -178,6 +212,10 @@ docker/Dockerfile
 - ✅ Backtest directo desde una instancia y precio/PnL en vivo de posiciones abiertas en Resumen.
 - ✅ Healthcheck de `app`/`app-demo` (`GET /health`, confirma que el proceso responde y puede hablar con la
   base) y remoción de Redis (estaba declarado pero sin ningún uso en el código).
-- Pulido de UI pendiente: tarjetas resumen en Operaciones, revisión de mobile.
-- Infraestructura pendiente: backups automatizados de la base, migrar los parches manuales de esquema
-  (`app/db/base.py`) a Alembic.
+- ✅ Pulido de UI: tarjetas resumen en Operaciones, catálogo/formulario/tarjetas de Estrategias, scroll
+  horizontal consistente en tablas anchas.
+- ✅ Login del dashboard, contenedor sin privilegios de root, límites de recursos en Docker, escaneo de
+  vulnerabilidades de dependencias en CI y defensa en profundidad contra XSS.
+- Pendiente: revisión de mobile a fondo (los grids ya son responsivos, falta probarlo en un dispositivo
+  real), backups automatizados de la base, migrar los parches manuales de esquema (`app/db/base.py`) a
+  Alembic.

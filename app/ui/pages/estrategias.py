@@ -58,6 +58,12 @@ def _stat(label: str, value: str, color: str = "") -> None:
         ui.label(value).classes(f"text-base font-semibold {color}")
 
 
+def _stat_sm(label: str, value: str, color: str = "") -> None:
+    with ui.column().classes("gap-0 min-w-[88px]"):
+        ui.label(label).classes("text-[10px] uppercase tracking-wide text-gray-400")
+        ui.label(value).classes(f"text-sm font-medium text-gray-600 {color}")
+
+
 def _sizing_notice(preview: svc.SizingPreview | None, error: str | None = None) -> None:
     if error:
         w.notice(error, "negative")
@@ -84,8 +90,9 @@ def open_editor(root, strategy_key: str, refresh, instance=None) -> None:
             name = ui.input("Nombre", value=instance.name if editing else "").props("outlined dense").classes("w-full")
             with ui.row().classes("w-full gap-3 no-wrap"):
                 symbol = ui.input("Símbolo", value=instance.symbol if editing else "BTCUSDT").props("outlined dense").classes("flex-1")
-                timeframe = ui.select(TIMEFRAMES, label="Timeframe", value=instance.timeframe if editing else "15").props(
-                    "outlined dense").classes("flex-1")
+                timeframe = ui.select(
+                    TIMEFRAMES, label="Timeframe", value=instance.timeframe if editing else strategy_cls.default_timeframe,
+                ).props("outlined dense").classes("flex-1")
             capital = ui.number(
                 "Capital asignado (USD)", value=instance.initial_capital if editing else 1000.0, min=1, format="%.2f"
             ).props("outlined dense").classes("w-full")
@@ -94,7 +101,7 @@ def open_editor(root, strategy_key: str, refresh, instance=None) -> None:
             ).classes("text-xs text-gray-500 -mt-2")
 
             ui.label("Parámetros").classes("text-sm font-semibold text-gray-900 mt-1")
-            with ui.column().classes("w-full gap-2"):
+            with ui.element("div").classes("grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 w-full"):
                 get_params = render_param_form(strategy_cls.params_model, instance.params if editing else None)
 
             ui.label("Chequeo de tamaño").classes("text-sm font-semibold text-gray-900 mt-1")
@@ -226,19 +233,18 @@ async def estrategias_page() -> None:
                 _stat("PnL realizado", f"{fmt_usd(stats['total_pnl'], signed=True)}" + (f" ({fmt_pct(pnl_pct, signed=True)})" if pnl_pct is not None else ""),
                       sign_class(stats["total_pnl"]))
                 _stat("Hoy", fmt_usd(stats["pnl_today"], signed=True), sign_class(stats["pnl_today"]))
-                _stat("Trades", str(stats["closed"]))
-                _stat("Win rate", fmt_pct(stats["win_rate_pct"]) if stats["win_rate_pct"] is not None else "—")
-                _stat("Profit factor", f"{stats['profit_factor']:.2f}" if stats["profit_factor"] else "—")
                 if open_trade:
                     _stat("Posición", f"{'▲ Long' if open_trade.side == 'long' else '▼ Short'} {open_trade.qty:g} @ {open_trade.entry_price:,.2f}")
                 else:
                     _stat("Posición", "Sin posición")
-                _stat("Última actividad", _ago(last.timestamp) if last else "—")
+            with ui.row().classes("w-full gap-6 flex-wrap"):
+                _stat_sm("Trades", str(stats["closed"]))
+                _stat_sm("Win rate", fmt_pct(stats["win_rate_pct"]) if stats["win_rate_pct"] is not None else "—")
+                _stat_sm("Profit factor", f"{stats['profit_factor']:.2f}" if stats["profit_factor"] else "—")
+                _stat_sm("Última actividad", _ago(last.timestamp) if last else "—")
 
             if last is not None and last.kind in ("rejected", "error"):
                 w.notice(f"{_ago(last.timestamp).capitalize()}: {last.message}", "warning" if last.kind == "rejected" else "negative")
-
-            _param_chips(strategy_cls, instance.params)
 
             with ui.row().classes("w-full items-center gap-1"):
                 ui.button(
@@ -253,6 +259,9 @@ async def estrategias_page() -> None:
                     with delete_btn:
                         ui.tooltip(delete_reason)
 
+            with ui.expansion(f"Parámetros ({len(instance.params)})", icon="tune").props("dense").classes("w-full"):
+                _param_chips(strategy_cls, instance.params)
+
             with ui.expansion("Actividad reciente", icon="history", value=instance.id in open_panels).props("dense").classes("w-full").on_value_change(
                 lambda e, i=instance.id: open_panels.add(i) if e.value else open_panels.discard(i)
             ):
@@ -265,6 +274,22 @@ async def estrategias_page() -> None:
                         ui.label(fmt(ev.timestamp, "%d/%m %H:%M")).classes("text-xs text-gray-500 w-24 shrink-0 pt-0.5")
                         ui.label(ev.message).classes("text-sm text-gray-800")
 
+    def _matches(instance, trades: list) -> bool:
+        query = (search.value or "").strip().lower()
+        if query:
+            haystack = f"{instance.name} {instance.symbol} {registry.get(instance.strategy_key).display_name}".lower()
+            if query not in haystack:
+                return False
+        state = state_filter.value
+        running = orchestrator.is_running(instance.id)
+        if state == "running" and not running:
+            return False
+        if state == "off" and running:
+            return False
+        if state == "open" and not any(t.closed_at is None for t in trades):
+            return False
+        return True
+
     async def refresh() -> None:
         instances = await load_instances()
         trades = await load_trades()
@@ -274,28 +299,52 @@ async def estrategias_page() -> None:
         running = sum(1 for i in instances if orchestrator.is_running(i.id))
 
         body.clear()
+        shown = [i for i in instances if _matches(i, by_instance.get(i.id, []))]
         with body:
             with ui.row().classes("items-center gap-3"):
                 ui.chip(f"{running} corriendo", icon="bolt").props("outline dense color=green" if running else "outline dense color=grey")
                 ui.chip(f"{len(instances)} instancias", icon="layers").props("outline dense color=grey-8")
+                if len(shown) != len(instances):
+                    ui.chip(f"{len(shown)} visibles", icon="filter_alt").props("outline dense color=primary")
             if not instances:
-                w.empty_state("smart_toy", "Todavía no creaste ninguna instancia. Elegí una estrategia arriba y creá la primera.")
-            for instance in instances:
+                w.empty_state("smart_toy", "Todavía no creaste ninguna instancia. Elegí una estrategia del catálogo y creá la primera.")
+            elif not shown:
+                w.empty_state("search_off", "Ninguna instancia coincide con la búsqueda o el filtro.")
+            for instance in shown:
                 await render_instance(instance, by_instance.get(instance.id, []))
 
-    with root, page_content("Estrategias", "Creá instancias de cada estrategia con su propio símbolo, capital y parámetros, y controlalas desde acá."):
-        with ui.column().classes("w-full gap-2"):
-            w.section_title("Catálogo", "Elegí una estrategia para crear una instancia con su propio símbolo, capital y parámetros.")
-            with ui.element("div").classes("grid grid-cols-1 md:grid-cols-3 gap-3 w-full"):
+    with root, page_content("Estrategias", "Controlá tus instancias y creá nuevas a partir del catálogo."):
+        with ui.expansion(f"Catálogo de estrategias ({len(registry.get_all())})", icon="library_add").props("dense").classes("w-full"):
+            with ui.element("div").classes("grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 w-full pt-2"):
                 for key, strategy_cls in registry.get_all().items():
-                    with ui.card().props("flat bordered").classes("p-4 gap-2 justify-between"):
-                        with ui.column().classes("gap-1"):
-                            ui.label(strategy_cls.display_name).classes("font-semibold text-gray-900")
-                            ui.label(strategy_cls.description or "").classes("text-sm text-gray-500")
+                    with ui.card().props("flat bordered").classes("p-4 gap-2 justify-between min-w-0"):
+                        with ui.column().classes("gap-1 min-w-0"):
+                            ui.label(strategy_cls.display_name).classes("font-semibold text-gray-900 text-sm leading-snug")
+                            with ui.row().classes("gap-1 flex-wrap"):
+                                if strategy_cls.style:
+                                    ui.chip(strategy_cls.style).props("outline dense size=sm color=primary")
+                                ui.chip(f"Sugerido: {TIMEFRAMES.get(strategy_cls.default_timeframe, strategy_cls.default_timeframe)}").props(
+                                    "outline dense size=sm color=grey-7")
+                            ui.label(strategy_cls.description or "").classes("text-xs text-gray-500").style(
+                                "display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden")
                         ui.button("Crear instancia", icon="add", on_click=lambda k=key: open_editor(root, k, refresh)).props("outline dense no-caps")
-        with ui.column().classes("w-full gap-2"):
-            w.section_title("Mis instancias")
+
+        with ui.row().classes("w-full items-end justify-between gap-3 flex-wrap"):
+            w.section_title("Mis instancias", "Encendé, editá y revisá cada instancia. Las apagadas no operan.")
+            with ui.row().classes("items-end gap-2"):
+                search = ui.input(placeholder="Buscar por nombre, símbolo o estrategia").props("outlined dense clearable").classes("w-96")
+                state_filter = ui.select(
+                    {"all": "Todas", "running": "Corriendo", "off": "Apagadas", "open": "Con posición abierta"},
+                    value="all", label="Estado",
+                ).props("outlined dense").classes("w-48")
+
         body = ui.column().classes("w-full gap-3")
+
+    async def on_filter(e=None) -> None:
+        await refresh()
+
+    search.on_value_change(on_filter)
+    state_filter.on_value_change(on_filter)
 
     await refresh()
 

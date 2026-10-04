@@ -53,13 +53,13 @@ class AxesSelector:
         self._busy = False
         self._axes: dict[str, dict] = {}
         keys = ("x", "y") if allow_second else ("x",)
-        with ui.element("div").classes("grid grid-cols-[minmax(0,2fr)_1fr_1fr_1fr] gap-x-3 gap-y-3 w-full items-center"):
-            for header in ("Parámetro", "Mínimo", "Máximo", "Paso"):
-                ui.label(header).classes("text-xs uppercase tracking-wide text-gray-500")
+        with ui.element("div").classes("grid grid-cols-3 sm:grid-cols-[minmax(0,2fr)_1fr_1fr_1fr] gap-x-3 gap-y-3 w-full items-center"):
             for axis in keys:
                 label = "Parámetro 1" if axis == "x" else "Parámetro 2 (opcional)"
-                widgets = {"select": _outlined(ui.select({}, label=label))}
-                widgets["min"], widgets["max"], widgets["step"] = (_outlined(ui.number()) for _ in range(3))
+                widgets = {"select": _outlined(ui.select({}, label=label)).classes("col-span-3 sm:col-span-1")}
+                widgets["min"] = _outlined(ui.number("Mínimo"))
+                widgets["max"] = _outlined(ui.number("Máximo"))
+                widgets["step"] = _outlined(ui.number("Paso"))
                 self._axes[axis] = widgets
         self.rebuild()
         for axis, widgets in self._axes.items():

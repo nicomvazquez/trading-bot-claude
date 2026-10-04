@@ -37,6 +37,8 @@ class VolatilitySqueezeStrategy(Strategy):
         "movimiento."
     )
     params_model = SqueezeParams
+    style = "Ruptura de volatilidad"
+    default_timeframe = "60"
 
     def on_candle(self, ctx: StrategyContext) -> Signal | None:
         p: SqueezeParams = self.params

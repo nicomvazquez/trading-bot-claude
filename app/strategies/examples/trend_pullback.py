@@ -38,6 +38,8 @@ class TrendPullbackStrategy(Strategy):
         "timeframes de 15 minutos a 1 hora."
     )
     params_model = TrendPullbackParams
+    style = "Tendencia · retroceso"
+    default_timeframe = "60"
 
     def __init__(self, params: BaseModel) -> None:
         super().__init__(params)

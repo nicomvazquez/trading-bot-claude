@@ -44,6 +44,8 @@ class RsiReversionStrategy(Strategy):
         "sobrecompra. Opera solo largos, con stop-loss fijo. Funciona mejor en mercados laterales."
     )
     params_model = RsiReversionParams
+    style = "Reversión a la media"
+    default_timeframe = "15"
 
     def on_candle(self, ctx: StrategyContext) -> Signal | None:
         params: RsiReversionParams = self.params

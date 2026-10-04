@@ -45,5 +45,8 @@ jobs:
       - name: Lint (imports sin usar)
         run: ruff check . --select F401
 
+      - name: Vulnerabilidades conocidas en dependencias
+        run: pip install pip-audit && pip-audit -r requirements.txt
+
       - name: Tests
         run: pytest -q

@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     # Zona horaria en la que se MUESTRAN las horas y se cuenta el "dia" (todo se guarda en UTC). Argentina: UTC-3.
     app_timezone: str = "America/Argentina/Buenos_Aires"
 
+    # Login del dashboard (un solo operador). app_password_hash se genera con
+    # `python -m app.tools.set_password`, nunca se guarda la contraseña en texto plano.
+    # Vacio = el arranque falla (ver check_security en main.py): no hay dashboard sin login.
+    app_user: str = "admin"
+    app_password_hash: str = ""
+    # Clave para firmar la cookie de sesion (NiceGUI storage_secret). Se genera una vez con
+    # `python -c "import secrets; print(secrets.token_hex(32))"` y no deberia cambiar despues
+    # (cambiarla invalida todas las sesiones activas).
+    app_storage_secret: str = ""
+
     # False: copia de demostracion con datos de ejemplo. No arranca runners ni permite encender instancias,
     # asi que nunca envia ordenes al exchange (ver docker-compose, servicio app-demo).
     live_enabled: bool = True
