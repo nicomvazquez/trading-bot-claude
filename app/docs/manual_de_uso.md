@@ -255,7 +255,57 @@ Con MAINNET activo aparece una franja roja permanente en toda la interfaz. Antes
 | Un backtest tarda mucho | Timeframes chicos (1 o 5 minutos) y muchos días generan muchísimas velas; ICT y el retroceso en 15 minutos son los más lentos. Probá menos días o un timeframe mayor. |
 | Bybit rechaza la clave (mensaje de clave inválida o permisos) | La API key no tiene los permisos necesarios (lectura y trading de derivados), venció, o es de otro entorno (Demo vs mainnet). Creá una nueva. |
 
-## 11. Glosario
+## 11. Operar el servidor (administración)
+
+Esta sección es para quien administra el servidor donde corre el sistema. Los comandos se ejecutan desde la consola del servidor, dentro de la carpeta del proyecto.
+
+**Entrar a la consola:** desde el panel del proveedor, abrí el servidor y usá la opción de consola web, con el usuario administrador. Por SSH también se puede entrar, cuando la red lo permite: `ssh root@IP-DEL-SERVIDOR`.
+
+**Ir a la carpeta del proyecto:**
+```bash
+cd ~/trading-bot-claude
+```
+
+**Chequeo de salud:**
+```bash
+docker compose ps                      # app y db deben decir "healthy"
+curl -s http://localhost:8080/health   # responde si la app está arriba
+docker compose exec db pg_isready -U trading_bot
+```
+
+**Ver los logs** (salir con `Ctrl+C`):
+```bash
+docker compose logs -f --tail 100 app
+docker compose logs app --tail 500 | grep -iE "error|traceback|critical"
+```
+
+**Ver qué instancias están encendidas:**
+```bash
+docker compose exec -T db psql -U trading_bot -d trading_bot -c   "select name, is_active from strategy_instances where is_active order by name;"
+```
+Para apagar una instancia usá el interruptor "Activa" en Estrategias. Para apagar todas, el botón **Cerrar todo** en Configuración.
+
+**Actualizar el código** (solo si hubo cambios en el repositorio):
+```bash
+git pull
+docker compose up -d --build app
+```
+
+**Si algo no responde:**
+- Reiniciar la app: `docker compose restart app`. Recarga el código, pero **no** relee el archivo `.env`.
+- Después de cambiar el `.env`: `docker compose up -d app`.
+- Si la base está caída: `docker compose up -d db` y esperar a que diga `healthy`.
+
+**Reglas importantes:**
+- No ejecutar `docker compose down -v`: borra la base, con las instancias y el historial.
+- No levantar dos copias del sistema con las mismas claves de Bybit al mismo tiempo: operarían sobre la misma cuenta.
+- No compartir contraseñas ni claves en chats ni capturas.
+- Antes de cambios importantes, hacer una copia de la base:
+```bash
+docker compose exec -T db pg_dump -U trading_bot trading_bot > ~/backup_$(date +%F).sql
+```
+
+## 12. Glosario
 
 - **Vela (kline):** resumen de precios de un período: apertura, máximo, mínimo, cierre y volumen.
 - **Timeframe:** el período de cada vela (15 min, 1 hora, 4 horas…).
